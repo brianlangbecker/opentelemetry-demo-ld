@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  template:
+    spec:
+      containers:
+      - name: frontend
+        env:
+        # Add LaunchDarkly client ID from secret
+        - name: NEXT_PUBLIC_LD_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: launchdarkly-secret
+              key: client-id

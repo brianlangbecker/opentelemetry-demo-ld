@@ -6,9 +6,11 @@ FROM docker.io/library/node:24-slim AS builder
 WORKDIR /app
 
 COPY ./src/frontend/package.json package.json
-COPY ./src/frontend/package-lock.json package-lock.json
 
-RUN npm ci
+RUN npm install --legacy-peer-deps
+
+ARG NEXT_PUBLIC_LD_CLIENT_ID
+ENV NEXT_PUBLIC_LD_CLIENT_ID=$NEXT_PUBLIC_LD_CLIENT_ID
 
 COPY ./src/frontend/components/ components/
 COPY ./src/frontend/gateways/ gateways/
@@ -36,9 +38,8 @@ FROM docker.io/library/node:24-slim AS deps
 WORKDIR /app
 
 COPY ./src/frontend/package.json package.json
-COPY ./src/frontend/package-lock.json package-lock.json
 
-RUN npm ci --omit=dev
+RUN npm install --omit=dev --legacy-peer-deps
 
 # -----------------------------------------------------------------------------
 

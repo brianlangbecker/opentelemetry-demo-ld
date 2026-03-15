@@ -6,7 +6,6 @@ import { Product } from '../../protos/demo';
 import ProductPrice from '../ProductPrice';
 import * as S from './ProductCard.styled';
 import { useState, useEffect } from 'react';
-import { useNumberFlagValue } from '@openfeature/react-sdk';
 
 interface IProps {
   product: Product;
@@ -29,7 +28,7 @@ const ProductCard = ({
     },
   },
 }: IProps) => {
-  const imageSlowLoad = useNumberFlagValue('imageSlowLoad', 0);
+  const imageSlowLoad = 0;
   const [imageSrc, setImageSrc] = useState<string>('');
 
   useEffect(() => {

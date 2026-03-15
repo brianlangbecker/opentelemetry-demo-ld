@@ -9,11 +9,16 @@ import * as S from '../styles/Home.styled';
 import { useQuery } from '@tanstack/react-query';
 import ApiGateway from '../gateways/Api.gateway';
 import Banner from '../components/Banner';
+import BannerV2 from '../components/Banner/BannerV2';
+import { useFlags } from 'launchdarkly-react-client-sdk';
 import { CypressFields } from '../utils/enums/CypressFields';
 import { useCurrency } from '../providers/Currency.provider';
 
 const Home: NextPage = () => {
   const { selectedCurrency } = useCurrency();
+  const flags = useFlags();
+  const bannerV2Enabled = flags.bannerV2Enabled ?? false;
+
   const { data: productList = [] } = useQuery({
     queryKey: ['products', selectedCurrency],
     queryFn: () => ApiGateway.listProducts(selectedCurrency),
@@ -25,7 +30,9 @@ const Home: NextPage = () => {
         <title>Otel Demo - Home</title>
       </Head>
       <S.Home data-cy={CypressFields.HomePage}>
-        <Banner />
+        {/* LaunchDarkly Feature Flag: banner-v2-enabled */}
+        {/* Toggle this flag in LaunchDarkly dashboard for instant updates with no page reload */}
+        {bannerV2Enabled ? <BannerV2 /> : <Banner />}
         <S.Container>
           <S.Row>
             <S.Content>
