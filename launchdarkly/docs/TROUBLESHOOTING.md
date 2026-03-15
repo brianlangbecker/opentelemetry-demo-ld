@@ -172,3 +172,50 @@ const bannerV2Enabled = flags.bannerV2Enabled ?? false;
 ```
 
 The SDK default can be disabled with `reactOptions={{ useCamelCaseFlagKeys: false }}` on `LDProvider`, but using the camelCased key is the correct approach — it works with the SDK's default rather than overriding it.
+
+---
+
+## Individual Targeting Not Working — LD Only Sees `anonymous-user`
+
+### Symptom
+Individual target is set in the LD dashboard for a specific session UUID. Default rule is `false`. But the flag still returns `false` — the individual target is never matched.
+
+### Diagnosis
+Check the LD **Live Events** tab on the flag's Targeting page. If it shows `anonymous-user` as the key instead of the real session UUID, `identify()` is not being called with the real user context.
+
+### Cause
+`LDProvider` initializes with a static `anonymous-user` key (required to avoid React SSR hydration errors). The real session UUID is only available client-side. The original approach relied on `LDProvider` watching its `context` prop for changes and calling `identify()` internally — but this was not happening reliably. LD never received the real key, so individual targets for the session UUID never matched.
+
+Additionally, `anonymous: true` in the context can interfere with individual targeting — LD treats anonymous contexts as having no persistent identity.
+
+### Fix
+Use `useLDClient().identify()` explicitly inside a component that lives inside `LDProvider`. This is the guaranteed way to switch user context at runtime:
+
+```tsx
+// In _app.tsx — inside LDProvider
+function LDIdentify() {
+  const ldClient = useLDClient();
+
+  useEffect(() => {
+    if (!ldClient) return;
+    const session = SessionGateway.getSession();
+    ldClient.identify({
+      kind: 'user',
+      key: session.userId,
+      currencyCode: session.currencyCode,
+      browser: getBrowser(),
+      isMobile: /Mobi|Android/i.test(navigator.userAgent),
+    });
+  }, [ldClient]);
+
+  return null;
+}
+```
+
+Add `<LDIdentify />` as the first child inside `<LDProvider>`. Remove `anonymous: true` from the context.
+
+### Why This Works
+`ldClient.identify()` is the explicit SDK API for switching users at runtime — it sends the new context to LD, re-evaluates all flags for that identity, and updates React Context so `useFlags()` re-renders. The `context` prop on `LDProvider` is only reliable for the initial user at mount time, not for post-hydration updates.
+
+### How to Verify
+After the fix, the LD Live Events tab should show your real session UUID as the key, and the reason should be `TARGET_MATCH` when individual targeting is configured.

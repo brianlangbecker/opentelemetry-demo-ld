@@ -31,7 +31,7 @@ LaunchDarkly has three different keys — each serves a different purpose:
 
 For this integration you need two:
 - **Client-side ID** — for the deploy script (Step 2)
-- **API access token** — for the remediate curl command (Step 5)
+- **API access token** — for the remediate curl command (Step 6)
 
 ### Get the Client-side ID
 
@@ -92,7 +92,48 @@ This is the core of the demo — a feature change or rollback with zero deployme
 
 ---
 
-## Step 5: Remediate via curl
+## Step 5: Individual Targeting — Test It Yourself First
+
+Before releasing to anyone else, target only your own browser session to verify the flag works. This is individual targeting.
+
+### Find Your Session ID
+
+Open `http://localhost:8080` and scroll to the bottom of the page. The footer shows:
+
+```
+session-id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+Copy that value — it is your user `key` in LaunchDarkly.
+
+### Add an Individual Target
+
+1. In the LD dashboard → **Feature Flags** → `banner-v2-enabled` → **Targeting** tab
+2. Make sure the flag targeting is **On** (the targeting toggle at the top — separate from the flag default)
+3. Under **Individual targets** → **Add user targets**
+4. Paste your session UUID
+5. Set variation to **true**
+6. Click **Review and save**
+
+The new banner now appears only in your browser. Open the same URL in a different browser or incognito window — it still shows the old banner. Nobody else is affected.
+
+### Expand to Rule-Based Targeting
+
+Once you've verified it works, move to rule-based targeting to expand the rollout:
+
+| Stage | Rule in LD | Who Sees It |
+|-------|-----------|-------------|
+| 1 | Individual: your session UUID | Just you |
+| 2 | `browser = "chrome"` → true | Internal team (Chrome users) |
+| 3 | `isMobile = false` → true | All desktop users |
+| 4 | Default rule: 10% → true | Gradual rollout — increase over time |
+| 5 | Flag ON globally | Everyone |
+
+See [docs/TARGETING.md](./docs/TARGETING.md) for full dashboard steps for each stage.
+
+---
+
+## Step 6: Remediate via curl
 
 Use your **API access token** (not the client-side ID) to turn the flag off programmatically:
 

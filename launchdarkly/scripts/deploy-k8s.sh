@@ -12,7 +12,6 @@ IMAGE="ghcr.io/open-telemetry/demo:latest-frontend"
 
 echo "Building frontend image..."
 docker build \
-  --no-cache \
   --build-arg NEXT_PUBLIC_LD_CLIENT_ID="$LD_CLIENT_ID" \
   -f "$REPO_ROOT/src/frontend/Dockerfile" \
   -t "$IMAGE" \

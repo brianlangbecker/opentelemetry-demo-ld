@@ -1,169 +1,198 @@
-# Targeting — User Context & Custom Attributes
+# Targeting — Individual and Rule-Based
 
-This document explains the user context passed to LaunchDarkly and how to use custom attributes for targeted flag rollouts.
-
----
-
-## What Is Targeting?
-
-Targeting lets you control which users see a feature based on their attributes — rather than turning a flag on for everyone at once. Examples:
-
-- "Roll out the new banner to Chrome users first"
-- "Only show the feature to mobile users"
-- "Enable for USD currency users before other regions"
-
-LaunchDarkly evaluates the user context on every flag request to decide what value to return for that specific user.
+This document covers Part 2 of the SE technical exercise: using context attributes to target the `banner-v2-enabled` flag to specific users and segments, simulating a real-world progressive rollout to 40,000 daily visitors.
 
 ---
 
-## Current User Context
+## The Scenario
+
+> You are a developer at ABC Company. The landing page gets 40,000 visitors a day. You want to ship the new banner safely — test it yourself first, then expand to your team, then to a broader segment, then to everyone.
+
+LaunchDarkly lets you do this entirely through targeting rules — no redeployment at any stage.
+
+---
+
+## User Context
 
 **File:** `src/frontend/pages/_app.tsx`
 
+The context is populated client-side after hydration:
+
 ```tsx
-context={{
-  kind: 'user',
-  key: session.userId,
-  anonymous: true,
-  currencyCode: session.currencyCode,
-  browser: isClient ? getBrowser() : 'unknown',
-  isMobile: isClient ? /Mobi|Android/i.test(navigator.userAgent) : false,
-}}
+useEffect(() => {
+  const session = SessionGateway.getSession();
+  setLdContext({
+    kind: 'user',
+    key: session.userId,              // UUID from localStorage — unique per browser session
+    anonymous: true,
+    currencyCode: session.currencyCode,   // 'USD', 'EUR', etc.
+    browser: getBrowser(),                // 'chrome', 'firefox', 'safari', 'edge', 'other'
+    isMobile: /Mobi|Android/i.test(navigator.userAgent),
+  });
+}, []);
 ```
 
 ### Attribute Breakdown
 
-| Attribute | Source | Values | Use Case |
-|-----------|--------|--------|----------|
-| `key` | `localStorage` UUID | e.g. `"a1b2c3..."` | Uniquely identifies the browser session |
-| `anonymous` | hardcoded | `true` | Tells LD not to store user profile (no login) |
-| `currencyCode` | session | `"USD"`, `"EUR"`, etc. | Target by region/currency |
-| `browser` | `navigator.userAgent` | `"chrome"`, `"firefox"`, `"safari"`, `"edge"`, `"other"` | Target by browser |
-| `isMobile` | `navigator.userAgent` | `true` / `false` | Target mobile vs desktop |
+| Attribute | Source | Values | Targeting Use |
+|-----------|--------|--------|---------------|
+| `key` | `localStorage` UUID | e.g. `"a1b2c3..."` | Individual targeting — uniquely identifies this browser session |
+| `anonymous` | hardcoded | `true` | Tells LD not to store the user profile (no login required) |
+| `currencyCode` | session | `"USD"`, `"EUR"`, etc. | Regional rollout — USD users before other regions |
+| `browser` | `navigator.userAgent` | `"chrome"`, `"firefox"`, `"safari"`, `"edge"`, `"other"` | Team rollout — internal team uses Chrome |
+| `isMobile` | `navigator.userAgent` | `true` / `false` | De-risk mobile — ship desktop first |
+
+---
+
+## Individual Targeting
+
+Individual targeting serves a specific flag value to a specific user by their `key`. This is how you test the feature yourself before anyone else sees it.
+
+### Find Your Session ID
+
+Your `key` is the session UUID shown in the footer of every page:
+
+```
+session-id: a1b2c3d4-e5f6-...
+```
+
+Or run in the browser console:
+```js
+JSON.parse(localStorage.getItem('session')).userId
+```
+
+### Add an Individual Target in LD
+
+1. Open the flag in the LD dashboard → **Targeting** tab
+2. Under **Individual targets** → **Add user targets**
+3. Paste your `key` (session UUID)
+4. Set variation to **true**
+5. Save — only your browser session sees the new banner
+
+Everyone else still sees the old banner. This is your personal test environment with zero risk to other users.
+
+---
+
+## Rule-Based Targeting
+
+Rules evaluate context attributes against conditions and serve a variation to all matching users. This is how you expand beyond yourself to groups.
+
+### Setting Up a Rule in LD
+
+Flag → **Targeting** tab → **Add rule** → set attribute, operator, value → set variation → Save.
+
+---
+
+## The Rollout Progression
+
+Use this sequence to tell the full ABC Company story. Each step is a targeting change only — no code, no deployment.
+
+### Stage 1: Developer Testing (Individual)
+
+**Goal:** Verify the feature works before anyone else sees it.
+
+In LD dashboard → **Individual targets** → add your session UUID → serve `true`.
+
+Result: Only your browser sees the new banner. 39,999 other visitors unaffected.
+
+---
+
+### Stage 2: Internal Team (Rule — browser)
+
+**Goal:** Expand to your team for broader testing. Your team uses Chrome internally.
+
+Add rule:
+```
+IF browser = "chrome" THEN serve → true
+```
+
+Result: All Chrome users see the new banner. Safari, Firefox, Edge users still see the old one. Your internal team can validate across their machines without exposing the change to the full user base.
+
+---
+
+### Stage 3: Desktop Only (Rule — isMobile)
+
+**Goal:** Expand to all desktop users, but hold mobile back while the mobile layout is reviewed.
+
+Update the Chrome rule to cover all desktop users:
+```
+IF isMobile = false THEN serve → true
+```
+
+Result: All desktop visitors see the new banner regardless of browser. Mobile users still see the old banner.
+
+---
+
+### Stage 4: Percentage Rollout (Rule — gradual)
+
+**Goal:** Gradually expose all users, catching any edge cases before full release.
+
+Replace the desktop rule with a percentage rollout:
+```
+DEFAULT RULE → serve → 10% true, 90% false
+```
+
+Increase the percentage over time: 10% → 25% → 50% → 100%.
+
+Result: A random but consistent slice of all 40,000 daily visitors sees the new banner. LD uses the user `key` to ensure the same user always gets the same variation — no flickering.
+
+---
+
+### Stage 5: Full Release
+
+**Goal:** Ship to everyone.
+
+Toggle the flag **ON** globally (serves `true` to all users regardless of rules), or set the default rule to 100% `true`.
+
+---
+
+### Stage 6: Rollback (if needed)
+
+At any stage, toggle the flag **OFF** to instantly revert every user to the old banner. No deployment required.
+
+---
+
+## The Live Demo
+
+This sequence works live in front of an audience:
+
+1. Open the app in Chrome — old banner (flag OFF globally)
+2. Add individual target for your session ID → ON — your browser shows new banner, open another browser to show it's still old
+3. Add rule `browser = "chrome"` → ON — refresh shows new banner in Chrome
+4. Open same URL in Safari — still old banner
+5. Remove Chrome rule, add `isMobile = false` → ON — desktop universally gets new banner
+6. Toggle flag OFF — everything reverts instantly across all browsers
 
 ---
 
 ## Why These Attributes?
 
-### What Was Removed and Why
+**`browser`** — derivable from `navigator.userAgent` without any login. Immediately demonstrable by opening the app in different browsers side by side.
 
-The original context had `email`, `isPremium`, and `accountAge` — none of these exist in the app:
+**`isMobile`** — same source. Compelling demo: show the same URL behaving differently on a phone vs desktop.
 
-```tsx
-// WRONG — these don't exist on the session object
-email: session.email || undefined,  // session has no email field
-isPremium: false,                   // hardcoded fake data
-accountAge: 0,                      // hardcoded fake data
-```
+**`currencyCode`** — already in the session from the app's existing currency selector. Creates a believable regional rollout story (USD users before EUR, etc.).
 
-Fake hardcoded attributes make targeting rules meaningless — every user would have identical values, so rules could never differentiate between users.
-
-### What Was Added and Why
-
-**`currencyCode`** — already in the session, reflects user preference, creates a believable regional rollout story.
-
-**`browser`** — derivable from `navigator.userAgent` without any login, immediately demonstrable by opening the app in different browsers.
-
-**`isMobile`** — same source, creates a compelling demo (walk over to a phone and show it works differently).
-
----
-
-## No Real Users? No Problem
-
-Since this app has no authentication, `anonymous: true` is the correct approach.
-
-LaunchDarkly generates and persists a random key in `localStorage` for anonymous users, ensuring the same browser session gets consistent flag evaluations. The `session.userId` UUID already serves this purpose here.
-
-### How Anonymous Targeting Works
-
-Even with `anonymous: true`, targeting rules still work based on other attributes:
-
-```
-IF browser = "chrome" THEN → ON
-IF isMobile = true THEN → ON
-IF currencyCode = "USD" THEN → ON
-ELSE → OFF (default)
-```
-
-The user doesn't need to be logged in — the attributes are what matter.
-
----
-
-## Setting Up Targeting Rules in LaunchDarkly
-
-### Individual Targeting (by key)
-
-In the LD dashboard → flag → **Targeting** tab:
-1. Under **Individual targets**, add a specific `key` (userId)
-2. Set to ON or OFF
-3. Good for testing — target your own browser session specifically
-
-To find your `key`, run this in the browser console:
-```js
-JSON.parse(localStorage.getItem('session')).userId
-```
-
-### Rule-Based Targeting
-
-In the LD dashboard → flag → **Targeting** tab → **Add rule**:
-
-**Example: Chrome users only**
-```
-IF browser = "chrome" THEN serve → true
-```
-
-**Example: Mobile users first**
-```
-IF isMobile = true THEN serve → true
-```
-
-**Example: USD rollout**
-```
-IF currencyCode = "USD" THEN serve → true
-```
-
-**Example: Percentage rollout**
-```
-IF browser = "chrome" THEN serve → 50% true, 50% false
-```
-
-### Default Rule
-
-At the bottom of targeting rules, set the **default rule** — what users get if no targeting rules match. Keep this as `false` (off) so untargeted users see the old experience.
-
----
-
-## The Demo Story
-
-With browser + mobile targeting, you can tell this story live:
-
-1. Open the app in Chrome on desktop — show the old banner (flag OFF globally)
-2. In LD dashboard, add rule: `IF browser = "chrome" THEN → ON`
-3. Chrome desktop instantly shows the new banner
-4. Open the same URL in Safari — still shows the old banner
-5. Open on a mobile device — add `isMobile = true` rule to also include mobile
-6. Roll back: remove rules or turn flag OFF — everything reverts instantly
-
-This is a targeted release followed by a targeted rollback.
+**What was removed:** Earlier drafts included `email`, `isPremium`, and `accountAge` — none of these exist in the session object. Hardcoded fake attributes make targeting rules meaningless since every user would have identical values.
 
 ---
 
 ## Adding More Attributes
 
-To add more targeting attributes, update the context in `_app.tsx`:
+Any attribute added to the context in `_app.tsx` becomes available in the LD dashboard immediately:
 
 ```tsx
-context={{
+setLdContext({
   kind: 'user',
   key: session.userId,
   anonymous: true,
   currencyCode: session.currencyCode,
-  browser: isClient ? getBrowser() : 'unknown',
-  isMobile: isClient ? /Mobi|Android/i.test(navigator.userAgent) : false,
-  // Add more here:
-  timezone: isClient ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'unknown',
-  language: isClient ? navigator.language : 'unknown',
-}}
+  browser: getBrowser(),
+  isMobile: /Mobi|Android/i.test(navigator.userAgent),
+  // examples of additional attributes:
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  language: navigator.language,
+});
 ```
 
-Any attribute you add here becomes available for targeting rules in the LD dashboard immediately — no SDK changes required.
+No SDK changes required — just add the field and it appears as a targetable attribute in the LD rule builder.

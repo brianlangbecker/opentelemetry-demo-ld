@@ -4,14 +4,14 @@
 import '../styles/globals.css';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App, { AppContext, AppProps } from 'next/app';
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import CurrencyProvider from '../providers/Currency.provider';
 import CartProvider from '../providers/Cart.provider';
 import { ThemeProvider } from 'styled-components';
 import Theme from '../styles/Theme';
 import FrontendTracer from '../utils/telemetry/FrontendTracer';
 import SessionGateway from '../gateways/Session.gateway';
-import { LDProvider } from 'launchdarkly-react-client-sdk';
+import { LDProvider, useLDClient } from 'launchdarkly-react-client-sdk';
 
 declare global {
   interface Window {
@@ -41,34 +41,32 @@ const getBrowser = () => {
   return 'other';
 };
 
-function MyApp({ Component, pageProps }: AppProps) {
-  // Static initial state must match the server render exactly.
-  // SessionGateway.getSession() calls v4() at module load — different UUID on server vs client
-  // causes React hydration error #418. We defer all session/browser reads to useEffect.
-  const [ldContext, setLdContext] = useState({
-    kind: 'user' as const,
-    key: 'anonymous-user',
-    anonymous: true,
-    currencyCode: 'USD',
-    browser: 'unknown',
-    isMobile: false,
-  });
+// Runs inside LDProvider — calls identify() with the real user context after hydration.
+// LDProvider initializes with a static placeholder key to avoid React SSR hydration errors.
+// This component then upgrades the client to the real session identity client-side.
+function LDIdentify() {
+  const ldClient = useLDClient();
 
   useEffect(() => {
+    if (!ldClient) return;
     const session = SessionGateway.getSession();
-    setLdContext({
+    ldClient.identify({
       kind: 'user',
       key: session.userId,
-      anonymous: true,
       currencyCode: session.currencyCode,
       browser: getBrowser(),
       isMobile: /Mobi|Android/i.test(navigator.userAgent),
     });
-  }, []);
+  }, [ldClient]);
 
+  return null;
+}
+
+function MyApp({ Component, pageProps }: AppProps) {
   return (
     <ThemeProvider theme={Theme}>
-      <LDProvider clientSideID={ldClientID} context={ldContext}>
+      <LDProvider clientSideID={ldClientID} context={{ kind: 'user', key: 'anonymous-user' }}>
+        <LDIdentify />
         <QueryClientProvider client={queryClient}>
           <CurrencyProvider>
             <CartProvider>

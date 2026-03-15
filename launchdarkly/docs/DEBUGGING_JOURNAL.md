@@ -296,3 +296,65 @@ With all three fixes applied:
 - Banner element has no style (flag evaluating `false` in React)
 
 Only after confirming the problem was in the React layer did we look for the hydration error.
+
+---
+
+## Part 2: Individual Targeting — Step 10: LD Only Sees `anonymous-user`
+
+With the banner toggle working, we moved to Part 2 of the exercise: individual targeting. The goal was to target a specific session UUID so only that browser session sees the new banner.
+
+### Setup
+- Flag targeting: ON
+- Default rule: `false`
+- Individual target: session UUID → `true`
+
+### Symptom
+The banner stayed grey. The flag was returning `false` despite the individual target being configured.
+
+### What We Checked
+
+**Confirmed the session UUID matches:** `JSON.parse(localStorage.getItem('session')).userId` returned the same UUID we entered in the LD dashboard. The keys matched exactly.
+
+**Checked the clientstream URL:** Decoded the base64 context from the SSE URL — confirmed the correct UUID was in the `key` field.
+
+**Checked the context kind:** LD requires the individual target context kind to match the context being sent. Our context sends `kind: "user"` — confirmed the individual target was also set to kind `user`.
+
+**Checked for whitespace:** Verified no leading/trailing spaces in the pasted UUID.
+
+Nothing pointed to the obvious cause. Then we checked the **LD Live Events** tab on the Targeting page.
+
+### The Finding
+
+Live Events showed every flag evaluation coming in with `key: anonymous-user` — the static placeholder from the initial `useState`. The real session UUID was never reaching LD.
+
+This explained everything: `LDProvider` initializes with `anonymous-user`, evaluates flags, and serves `false` (no individual target for that key, default is false). The `useEffect` in `_app.tsx` was calling `setLdContext()` with the real UUID, which updated the `context` prop on `LDProvider` — but `LDProvider` was not reliably calling `identify()` when the prop changed. LD never saw the real user.
+
+Additionally, `anonymous: true` in the context signals to LD that the user has no persistent identity, which can interfere with individual targeting by key.
+
+### Fix
+
+Replace the `context` prop update pattern with an explicit `ldClient.identify()` call. Create a small `LDIdentify` component inside `LDProvider` that uses `useLDClient()` to call `identify()` directly after hydration:
+
+```tsx
+function LDIdentify() {
+  const ldClient = useLDClient();
+
+  useEffect(() => {
+    if (!ldClient) return;
+    const session = SessionGateway.getSession();
+    ldClient.identify({
+      kind: 'user',
+      key: session.userId,
+      currencyCode: session.currencyCode,
+      browser: getBrowser(),
+      isMobile: /Mobi|Android/i.test(navigator.userAgent),
+    });
+  }, [ldClient]);
+
+  return null;
+}
+```
+
+`useLDClient()` must be called inside a child of `LDProvider` — that's why it's a separate component rather than inline in `MyApp`. After mounting, it calls `identify()` once with the real session data, LD re-evaluates all flags for that identity, and `useFlags()` updates reactively.
+
+After deploying this fix, Live Events showed the real session UUID as the key, and individual targeting worked as expected.

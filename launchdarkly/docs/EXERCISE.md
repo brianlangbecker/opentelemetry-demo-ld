@@ -34,60 +34,89 @@ This document maps the LaunchDarkly SE technical exercise requirements to the im
 
 The `banner-v2-enabled` boolean flag controls which homepage banner renders:
 
-- **OFF**: Original banner — gray background, "The best telescopes in the universe"
+- **OFF**: Original banner — gray background, "The best telescopes to see the world closer"
 - **ON**: New banner — purple gradient, "Experience the New Telescope Collection"
 
 **Files changed:**
-- `src/frontend/pages/_app.tsx` — `LDProvider` wraps the app
-- `src/frontend/pages/index.tsx` — `useFlags()` evaluates the flag
-- `src/frontend/components/Banner/BannerV2.tsx` — new banner component
+
+| File | Change |
+|------|--------|
+| `src/frontend/pages/_app.tsx` | `LDProvider` wraps the app with hydration-safe user context |
+| `src/frontend/pages/index.tsx` | `useFlags()` evaluates `bannerV2Enabled` and conditionally renders the banner |
+| `src/frontend/components/Banner/BannerV2.tsx` | New banner component shown when flag is ON |
+| `src/frontend/components/PlatformFlag/PlatformFlag.tsx` | Fixed module-scope `window.ENV` read that caused React hydration error |
+| `src/frontend/components/ProductCard/ProductCard.tsx` | Removed OpenFeature dependency, hardcoded `imageSlowLoad = 0` |
+| `src/frontend/package.json` | Replaced `@openfeature/react-sdk` with `launchdarkly-react-client-sdk` |
+| `src/frontend/Dockerfile` | Added `ARG`/`ENV` for `NEXT_PUBLIC_LD_CLIENT_ID`, switched to `npm install --legacy-peer-deps` |
 
 ### The Listener
 
-`useFlags()` in `index.tsx` is the listener. It subscribes to flag changes via the WebSocket connection that `LDProvider` maintains to `sdk.launchdarkly.com`. When the flag changes, React re-renders automatically — no `addEventListener`, no polling, no page reload.
+`useFlags()` in `index.tsx` is the listener. It subscribes to flag changes via the SSE stream that `LDProvider` maintains to `clientstream.launchdarkly.com`. When the flag changes, React re-renders automatically — no `addEventListener`, no polling, no page reload.
+
+```tsx
+const flags = useFlags();
+const bannerV2Enabled = flags.bannerV2Enabled ?? false;
+// Note: the React SDK camelCases flag keys by default — 'banner-v2-enabled' → 'bannerV2Enabled'
+```
 
 See [HOW_IT_WORKS.md](./HOW_IT_WORKS.md) for a full technical explanation.
 
 ### Remediate
 
-Toggle via the LD dashboard (manual), or programmatically via curl:
+Toggle via the LD dashboard (manual), or programmatically via curl using an API access token (Writer role):
 
 ```bash
 curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enabled \
-  -H "Authorization: api-YOUR-API-KEY" \
+  -H "Authorization: api-YOUR-API-ACCESS-TOKEN" \
   -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
   -d '{"instructions": [{"kind": "turnFlagOff"}]}'
 ```
 
-See [RELEASE-REMEDIATE.md](./RELEASE-REMEDIATE.md) for full details.
+See [RELEASE-REMEDIATE.md](./RELEASE-REMEDIATE.md) for the full demo sequence and talking points.
 
 ---
 
 ## How Part 2 Is Implemented
 
-The user context in `_app.tsx` includes targeting attributes:
+### Context Attributes
+
+The user context in `_app.tsx` is populated client-side via `useEffect`. It provides the attributes used for targeting:
 
 ```tsx
-context={{
+setLdContext({
   kind: 'user',
-  key: session.userId,
+  key: session.userId,              // UUID — unique per browser session, shown in footer
   anonymous: true,
   currencyCode: session.currencyCode,   // 'USD', 'EUR', etc.
-  browser: getBrowser(),                 // 'chrome', 'firefox', 'safari', 'edge'
+  browser: getBrowser(),                // 'chrome', 'firefox', 'safari', 'edge', 'other'
   isMobile: /Mobi|Android/i.test(navigator.userAgent),
-}}
+});
 ```
 
-**Targeting rule examples** (configured in LD dashboard):
+### Individual Targeting
 
-| Rule | Effect |
-|------|--------|
-| `browser = "chrome"` → ON | Chrome users see new banner first |
-| `isMobile = true` → ON | Mobile users get new banner |
-| `currencyCode = "USD"` → ON | US region gets new banner first |
-| Percentage rollout 10% | Gradual rollout to 10% of all users |
+Individual targeting serves a flag variation to a specific user by their `key`. The session UUID is visible in the footer of every page (`session-id: ...`), making it easy to target your own browser session.
 
-See [TARGETING.md](./TARGETING.md) for the full targeting guide.
+**Use case:** Test the new banner yourself before anyone else sees it.
+
+In LD dashboard → flag → **Targeting** tab → **Individual targets** → paste your session UUID → serve `true`.
+
+### Rule-Based Targeting
+
+Rules evaluate context attributes to target groups of users. The progression for the ABC Company scenario (40,000 daily visitors):
+
+| Stage | Rule | Who Sees It |
+|-------|------|-------------|
+| 1 | Individual: your `userId` | Just you — developer testing |
+| 2 | `browser = "chrome"` → ON | Internal team (Chrome users) |
+| 3 | `isMobile = false` → ON | All desktop users — hold mobile while layout is reviewed |
+| 4 | Default rule: 10% → ON | 1 in 10 visitors — gradual rollout, increase over time |
+| 5 | Flag ON globally | All 40,000 daily visitors |
+| 6 | Flag OFF (if needed) | Instant rollback — everyone reverts |
+
+Each stage is a targeting rule change in the LD dashboard — no code, no deployment.
+
+See [TARGETING.md](./TARGETING.md) for dashboard steps, the live demo sequence, and full attribute details.
 
 ---
 
@@ -145,7 +174,7 @@ The exercise could have been implemented in the Java AdService or Go services. F
 ### OpenFeature / flagd (original setup)
 
 The demo originally used OpenFeature with flagd as a proxy layer. This was replaced with the LaunchDarkly SDK directly because:
-- LaunchDarkly's React SDK handles WebSocket and real-time updates natively
+- LaunchDarkly's React SDK handles SSE and real-time updates natively
 - Fewer moving parts — no flagd container needed
 - The `useFlags()` hook is the simplest possible implementation of the "listener" requirement
 
@@ -174,8 +203,8 @@ These were in an earlier draft of the context but removed because the session ob
 
 ## Running the Full Demo
 
-1. Start the app: `npm run dev` in `src/frontend/` (or K8s deploy)
-2. Open `http://localhost:3000` — original banner visible
+1. Deploy: `LD_CLIENT_ID="your-id" ./launchdarkly/scripts/deploy-k8s.sh`
+2. Open `http://localhost:8080` — original banner visible
 3. In LD dashboard, toggle `banner-v2-enabled` ON — new banner appears instantly
 4. Add targeting rule `browser = "chrome"` — demonstrate per-browser targeting
 5. Toggle OFF in dashboard — reverts instantly (rollback)
