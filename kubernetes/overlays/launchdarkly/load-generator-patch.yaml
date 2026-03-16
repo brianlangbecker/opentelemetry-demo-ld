@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+spec:
+  template:
+    spec:
+      containers:
+      - name: load-generator
+        image: ghcr.io/YOUR_GITHUB_ORG/otel-demo-load-generator:ld

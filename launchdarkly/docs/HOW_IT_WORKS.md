@@ -30,30 +30,24 @@ No polling. No manual event listeners. No page reload.
 
 ---
 
-## LDProvider — The Root Provider
+## withLDProvider — The Root Provider
 
 **File:** `src/frontend/pages/_app.tsx`
 
 ```tsx
-<LDProvider clientSideID={ldClientID} context={ldContext}>
-  <QueryClientProvider ...>
-    <CurrencyProvider>
-      <CartProvider>
-        <Component {...pageProps} />
-      </CartProvider>
-    </CurrencyProvider>
-  </QueryClientProvider>
-</LDProvider>
+export default withLDProvider({
+  clientSideID: ldClientID,
+})(MyApp as any);
 ```
 
-`LDProvider` does two things when the app loads:
+`withLDProvider` is a Higher Order Component (HOC) from `launchdarkly-react-client-sdk`. It wraps `MyApp` with the LD context provider and initializes the SDK at `componentDidMount` — client-side only, so there are no SSR conflicts.
+
+It does two things when the app mounts:
 
 1. **Opens an SSE stream** to `clientstream.launchdarkly.com` using your `clientSideID` — this is the persistent connection that receives real-time flag updates.
-2. **Evaluates all flags** for the given user context and stores the results in React Context.
+2. **Initializes with an anonymous context** until `identify()` is called with the real user.
 
-It wraps the entire app so any component anywhere in the tree can access flag values via `useFlags()`.
-
-The `context` prop is a React state variable (`ldContext`) that starts with static placeholder values on first render, then updates with real user data after hydration. See the appendix for why.
+Because `withLDProvider` wraps `MyApp`, every component in the tree — including `MyApp` itself — can call `useLDClient()` and `useFlags()` directly.
 
 ---
 
@@ -61,36 +55,34 @@ The `context` prop is a React state variable (`ldContext`) that starts with stat
 
 **File:** `src/frontend/pages/_app.tsx`
 
-The context is initialized with static values, then populated client-side in `useEffect`:
+`withLDProvider` initializes with an anonymous context. After the component mounts, `identify()` is called with the real session data:
 
 ```tsx
-const [ldContext, setLdContext] = useState({
-  kind: 'user' as const,
-  key: 'anonymous-user',   // static placeholder — safe for SSR
-  anonymous: true,
-  currencyCode: 'USD',     // static placeholder — safe for SSR
-  browser: 'unknown',      // static placeholder — safe for SSR
-  isMobile: false,         // static placeholder — safe for SSR
-});
+function MyApp({ Component, pageProps }: AppProps) {
+  const ldClient = useLDClient();
 
-useEffect(() => {
-  const session = SessionGateway.getSession();
-  setLdContext({
-    kind: 'user',
-    key: session.userId,            // UUID from localStorage
-    anonymous: true,
-    currencyCode: session.currencyCode,  // 'USD', 'EUR', etc.
-    browser: getBrowser(),          // 'chrome', 'firefox', 'safari', 'edge', 'other'
-    isMobile: /Mobi|Android/i.test(navigator.userAgent),
-  });
-}, []);
+  useEffect(() => {
+    if (!ldClient) return;
+    const session = SessionGateway.getSession();
+    ldClient.identify({
+      kind: 'user',
+      key: session.userId,             // UUID from localStorage
+      currencyCode: session.currencyCode,   // 'USD', 'EUR', etc.
+      browser: getBrowser(),           // 'chrome', 'firefox', 'safari', 'edge', 'other'
+      isMobile: /Mobi|Android/i.test(navigator.userAgent),
+    });
+  }, [ldClient]);
+  ...
+}
 ```
 
 This context is sent to LaunchDarkly so it can evaluate targeting rules per user. LaunchDarkly uses this to answer: "Given this user's attributes, what should this flag evaluate to?"
 
-### Why `anonymous: true`?
+### Why `identify()` instead of a `context` prop?
 
-This app has no real user accounts. `anonymous: true` tells LaunchDarkly not to store the user profile in its dashboard. The `key` (UUID from `SessionGateway`) persists in `localStorage`, so the same browser session gets consistent flag evaluations across page loads.
+`withLDProvider` initializes client-side only, but `localStorage` and `navigator` are still not available at module load time. `identify()` is called inside `useEffect`, which only runs in the browser after mount — the correct place for any client-only data.
+
+`identify()` is also the explicit SDK API for switching user identity at runtime. It re-evaluates all flags for the new context and updates React state, so `useFlags()` re-renders with the correct values.
 
 ### Why not `email`, `isPremium`, `accountAge`?
 
@@ -109,7 +101,7 @@ const getBrowser = () => {
 };
 ```
 
-Parses `navigator.userAgent` to detect the browser. Used as a targeting attribute so you can roll out flags to specific browsers (e.g., Chrome first, then Firefox, then all). Called inside `useEffect` so it only runs in the browser — `navigator` doesn't exist server-side.
+Parses `navigator.userAgent` to detect the browser. Used as a targeting attribute so you can roll out flags to specific browsers. Called inside `useEffect` — `navigator` doesn't exist server-side.
 
 ---
 
@@ -197,13 +189,13 @@ This is the core "instant release/rollback" capability.
 
 ## Appendix: Next.js SSR and Hydration-Safe State
 
-### Why the LDProvider context uses static initial values
+### Why `withLDProvider` avoids the hydration problem
 
-Next.js renders pages on the server first, sends the HTML to the browser, then React "hydrates" — it attaches event listeners and takes over the static HTML. If the HTML React tries to render client-side doesn't exactly match what the server sent, React throws hydration error #418 and re-mounts from scratch. When `LDProvider` re-mounts, it starts a fresh client that hasn't received flags yet, so `useFlags()` returns `false` even though the flag is `true` in LD.
+`withLDProvider` initializes the SDK at `componentDidMount` — client-side only. It never renders anything during SSR, so there is no server/client HTML mismatch from the LD layer.
 
-The fix is to ensure the initial `useState` value is fully static — identical on server and client — and defer all dynamic reads to `useEffect`.
+Earlier iterations of this integration used `<LDProvider context={ldContext}>` as a JSX wrapper with a `useState` placeholder. This caused React hydration error #418 because values like `session.userId` differed between server and client renders. `withLDProvider` sidesteps this entirely by not involving the server at all.
 
-### Why session.userId can't be used directly in initial state
+### Why session.userId can't be read at module scope
 
 `SessionGateway` calls `uuid.v4()` at **module load time**:
 
@@ -214,7 +206,9 @@ const defaultSession = {
 };
 ```
 
-Next.js imports the module twice: once in the Node.js server process, once in the browser. Each call to `v4()` produces a different UUID. The server renders `key: "abc-123"` and the client hydrates with `key: "xyz-789"` — React sees the mismatch and throws.
+Next.js imports the module twice: once in the Node.js server process, once in the browser. Each call to `v4()` produces a different UUID. Any component that reads this value at render time will get different output on server vs client — causing React error #418.
+
+This is why `identify()` is called inside `useEffect`, not at render time.
 
 ### The general rule
 

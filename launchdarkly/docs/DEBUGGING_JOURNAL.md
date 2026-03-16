@@ -358,3 +358,33 @@ function LDIdentify() {
 `useLDClient()` must be called inside a child of `LDProvider` — that's why it's a separate component rather than inline in `MyApp`. After mounting, it calls `identify()` once with the real session data, LD re-evaluates all flags for that identity, and `useFlags()` updates reactively.
 
 After deploying this fix, Live Events showed the real session UUID as the key, and individual targeting worked as expected.
+
+---
+
+## Step 11: Retrofit to Official LD Pattern — `withLDProvider`
+
+With everything working, we reviewed the official LaunchDarkly React SDK documentation and found that the `withLDProvider` HOC is the idiomatic initialization pattern. It also eliminates the remaining complexity in `_app.tsx`.
+
+**The LD docs state:**
+
+> *"If your app does not yet have the context when you initialize, you can omit the context option. This instantiates the client without explicitly specifying a context. Instead, the React Web SDK uses an anonymous context. Later, when you have the context, you can call identify."*
+
+This is exactly our pattern. The retrofit replaced:
+
+| Before | After |
+|--------|-------|
+| `import { LDProvider }` | `import { withLDProvider, useLDClient }` |
+| `<LDProvider context={ldContext}>` JSX wrapper | `withLDProvider({ clientSideID })(MyApp as any)` HOC on export |
+| `useState` for `ldContext` | Removed entirely |
+| Separate `LDIdentify` component | `useLDClient()` called directly in `MyApp` |
+| `anonymous: true` in context | Removed |
+
+**Why `withLDProvider` is cleaner:**
+
+- `withLDProvider` wraps `MyApp`, so `MyApp` is rendered inside the provider — `useLDClient()` works directly without a child wrapper component
+- Initializes at `componentDidMount` (client-side only) — no SSR involvement, no hydration concerns from the LD layer
+- Matches the official documented pattern exactly
+
+**The `as any` cast:**
+
+`withLDProvider` expects `ComponentType<{}>` but Next.js `AppProps` has required props (`pageProps`, etc.) that don't satisfy that type. The cast is necessary due to a TypeScript signature mismatch between the LD HOC and Next.js app wrapper types — runtime behavior is correct.

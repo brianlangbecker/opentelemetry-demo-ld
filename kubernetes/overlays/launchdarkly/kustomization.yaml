@@ -6,4 +6,5 @@ resources:
 
 patches:
   - path: frontend-patch.yaml
+  - path: load-generator-patch.yaml
 

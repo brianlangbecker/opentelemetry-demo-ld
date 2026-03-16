@@ -11,7 +11,7 @@ import { ThemeProvider } from 'styled-components';
 import Theme from '../styles/Theme';
 import FrontendTracer from '../utils/telemetry/FrontendTracer';
 import SessionGateway from '../gateways/Session.gateway';
-import { LDProvider, useLDClient } from 'launchdarkly-react-client-sdk';
+import { withLDProvider, useLDClient } from 'launchdarkly-react-client-sdk';
 
 declare global {
   interface Window {
@@ -41,12 +41,11 @@ const getBrowser = () => {
   return 'other';
 };
 
-// Runs inside LDProvider — calls identify() with the real user context after hydration.
-// LDProvider initializes with a static placeholder key to avoid React SSR hydration errors.
-// This component then upgrades the client to the real session identity client-side.
-function LDIdentify() {
+function MyApp({ Component, pageProps }: AppProps) {
   const ldClient = useLDClient();
 
+  // Identify the real user after mount. withLDProvider initializes with an anonymous context;
+  // identify() switches to the actual session identity so targeting rules evaluate correctly.
   useEffect(() => {
     if (!ldClient) return;
     const session = SessionGateway.getSession();
@@ -59,30 +58,28 @@ function LDIdentify() {
     });
   }, [ldClient]);
 
-  return null;
-}
-
-function MyApp({ Component, pageProps }: AppProps) {
   return (
     <ThemeProvider theme={Theme}>
-      <LDProvider clientSideID={ldClientID} context={{ kind: 'user', key: 'anonymous-user' }}>
-        <LDIdentify />
-        <QueryClientProvider client={queryClient}>
-          <CurrencyProvider>
-            <CartProvider>
-              <Component {...pageProps} />
-            </CartProvider>
-          </CurrencyProvider>
-        </QueryClientProvider>
-      </LDProvider>
+      <QueryClientProvider client={queryClient}>
+        <CurrencyProvider>
+          <CartProvider>
+            <Component {...pageProps} />
+          </CartProvider>
+        </CurrencyProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }
 
 MyApp.getInitialProps = async (appContext: AppContext) => {
   const appProps = await App.getInitialProps(appContext);
-
   return { ...appProps };
 };
 
-export default MyApp;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export default withLDProvider({
+  clientSideID: ldClientID,
+  options: {
+    flushInterval: 5000, // flush events every 5s instead of 30s — needed for Playwright experiment traffic
+  },
+})(MyApp as any);

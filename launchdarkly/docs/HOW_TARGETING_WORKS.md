@@ -9,20 +9,20 @@ This document explains the mechanics of LaunchDarkly targeting — how user cont
 ```
 Your App (browser)
   └── sends user context to LaunchDarkly
-        { browser: "chrome", isMobile: false, currencyCode: "USD" }
+        { kind: "user", key: "uuid", isMobile: false, browser: "chrome", currencyCode: "USD" }
               |
               v
-  LaunchDarkly evaluates targeting rules (top to bottom)
-        Rule 1: IF browser = "chrome" → true
-        Rule 2: IF isMobile = true → true
-        Default: → false
+  LaunchDarkly evaluates targeting (top to bottom, first match wins)
+        Individual targets: key = "your-uuid" → true    ← checked first
+        Custom rule:        isMobile = false  → true    ← checked next
+        Default rule:                         → false   ← fallback
               |
               v
   Returns flag value for this specific user
-        → true (because browser matched Rule 1)
+        → true (because isMobile = false matched)
               |
               v
-  useFlags() in your component gets { 'banner-v2-enabled': true }
+  useFlags() in your component gets { bannerV2Enabled: true }
   → BannerV2 renders
 ```
 
@@ -30,19 +30,18 @@ Your App (browser)
 
 ## What Are Targeting Attributes?
 
-Attributes are key-value pairs you attach to the user context when initializing `LDProvider`. They describe the current user's environment, preferences, or identity.
+Attributes are key-value pairs sent to LaunchDarkly via `identify()` after the app mounts. They describe the current user's environment, preferences, or identity.
 
 In this app:
 
 ```tsx
-context={{
+ldClient.identify({
   kind: 'user',
   key: session.userId,        // string — unique ID per browser session
-  anonymous: true,            // boolean — no real login
   currencyCode: 'USD',        // string — from session
   browser: 'chrome',          // string — detected from userAgent
   isMobile: false,            // boolean — detected from userAgent
-}}
+});
 ```
 
 LaunchDarkly doesn't know what these mean — **you define the meaning** by writing rules in the dashboard. The SDK just sends whatever you put in the context object.
@@ -51,24 +50,23 @@ LaunchDarkly doesn't know what these mean — **you define the meaning** by writ
 
 ## Rule Evaluation Order
 
-Rules are evaluated **top to bottom**. The first rule that matches wins — subsequent rules are not checked.
+Rules are evaluated **top to bottom** and act as **OR conditions** — the first rule that matches wins, subsequent rules are not checked.
 
 ```
-Rule 1: IF browser = "chrome" AND isMobile = false → serve true
-Rule 2: IF currencyCode = "USD" → serve true
-Rule 3: IF isMobile = true → serve true
-Default rule: serve false
+Individual targets: key = "your-uuid"  → serve true   ← checked first, overrides all rules
+Custom rule:        isMobile = false   → serve true   ← checked next
+Default rule:                          → serve false  ← fallback for everyone else
 ```
 
-A Chrome desktop user matches Rule 1 and gets `true`. LD stops there, never checks Rules 2 or 3.
+A user with the individual target UUID → gets `true` immediately, rules not checked.
 
-A Firefox USD user doesn't match Rule 1, skips to Rule 2, matches, gets `true`.
+A desktop user (`isMobile: false`) without the individual target → matches the custom rule → gets `true`.
 
-A Safari mobile non-USD user skips Rules 1 and 2, matches Rule 3, gets `true`.
+A mobile user (`isMobile: true`) without the individual target → does not match the custom rule → hits the default → gets `false`.
 
-A Firefox desktop non-USD user matches no rules, hits the default, gets `false`.
+**Order matters.** Individual targets are always evaluated first, then custom rules top to bottom, then the default rule.
 
-**Order matters.** Put your most specific rules first.
+> **Important:** Because rules are OR conditions, make sure the default rule is set to `false` when using custom rules to restrict access. If the default is `true`, mobile users will still see the new banner despite not matching any rule.
 
 ---
 
@@ -92,11 +90,11 @@ To find your key, run in the browser console:
 JSON.parse(localStorage.getItem('session')).userId
 ```
 
-### Rule-Based Targeting
+### Rule-Based Targeting (Custom Rules)
 
 Rules apply to any user whose attributes match the conditions. Useful for:
-- Rolling out to all Chrome users
-- Targeting mobile devices
+- Targeting desktop users only (`isMobile = false`) while mobile layout is reviewed
+- Rolling out to specific browsers
 - Gradual percentage rollouts
 
 Rules are evaluated after individual targets. If a user's `key` is individually targeted, the rules are skipped.
@@ -140,17 +138,18 @@ This enables **gradual rollouts**:
 
 ## What Happens When the SDK Initializes
 
-When `LDProvider` loads in `_app.tsx`:
+When `withLDProvider` mounts in `_app.tsx`:
 
-1. It sends the user context to LaunchDarkly's servers
-2. LD evaluates **all** flags for this user against all targeting rules
-3. LD returns the evaluated values for every flag
-4. These are cached locally in the SDK
-5. `useFlags()` reads from this local cache — no network call per hook invocation
+1. SDK initializes client-side with an anonymous context
+2. `useEffect` fires → `ldClient.identify()` is called with the real session data
+3. LD evaluates **all** flags for this user against all targeting rules
+4. LD returns the evaluated values for every flag
+5. These are cached locally in the SDK
+6. `useFlags()` reads from this local cache — no network call per hook invocation
 
 When you toggle a flag in the LD dashboard:
 1. LD re-evaluates rules for all connected users
-2. Pushes new values over the WebSocket
+2. Pushes new values over the SSE stream
 3. SDK updates local cache
 4. React re-renders components using `useFlags()`
 
@@ -162,9 +161,9 @@ These three things are often confused:
 
 | Thing | What It Is | Where It Goes |
 |-------|-----------|---------------|
-| **Client-side ID** | Identifies your LD project/environment. Public, safe to expose. | `clientSideID` prop on `LDProvider` |
+| **Client-side ID** | Identifies your LD project/environment. Public, safe to expose. | `clientSideID` in `withLDProvider` |
 | **SDK key** | Server-side auth key. Private, never expose in browser. | Backend services only |
-| **User context** | Describes the current user. Used for targeting. | `context` prop on `LDProvider` |
+| **User context** | Describes the current user. Used for targeting. | Passed via `ldClient.identify()` after mount |
 
 The client-side ID authenticates your app to LD. The user context tells LD who to evaluate rules for. They're independent.
 
@@ -172,14 +171,11 @@ The client-side ID authenticates your app to LD. The user context tells LD who t
 
 ## Anonymous Users
 
-When `anonymous: true` is set:
+This app has no login system. Each user gets a randomly generated UUID stored in `localStorage` via `SessionGateway`. That UUID is used as the `key` in `identify()`.
 
-- LD does not store the user's profile in the dashboard
-- Rules still evaluate normally based on other attributes (`browser`, `isMobile`, etc.)
-- The `key` is still used for consistent percentage rollout bucketing
-- Useful when there's no login system — attributes still work for targeting
+We do not set `anonymous: true`. While LD supports anonymous contexts, setting `anonymous: true` interferes with individual targeting by key — LD may skip individual target matching for anonymous contexts. Since we need individual targeting to work for the demo, we treat the session UUID as a real (though non-authenticated) user identity.
 
-In this app, every user is anonymous but still gets targeted based on browser type and device.
+The `key` persists in `localStorage` across page loads, so the same browser session always evaluates flags consistently — including consistent percentage rollout bucketing.
 
 ---
 

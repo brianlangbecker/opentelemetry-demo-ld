@@ -189,11 +189,11 @@ Check the LD **Live Events** tab on the flag's Targeting page. If it shows `anon
 Additionally, `anonymous: true` in the context can interfere with individual targeting — LD treats anonymous contexts as having no persistent identity.
 
 ### Fix
-Use `useLDClient().identify()` explicitly inside a component that lives inside `LDProvider`. This is the guaranteed way to switch user context at runtime:
+Use `withLDProvider` as a HOC on the export and call `useLDClient().identify()` directly in `MyApp`. Because `withLDProvider` wraps `MyApp`, `useLDClient()` is available inside `MyApp` without a separate component:
 
 ```tsx
-// In _app.tsx — inside LDProvider
-function LDIdentify() {
+// _app.tsx
+function MyApp({ Component, pageProps }: AppProps) {
   const ldClient = useLDClient();
 
   useEffect(() => {
@@ -207,15 +207,16 @@ function LDIdentify() {
       isMobile: /Mobi|Android/i.test(navigator.userAgent),
     });
   }, [ldClient]);
-
-  return null;
+  ...
 }
+
+export default withLDProvider({ clientSideID: ldClientID })(MyApp as any);
 ```
 
-Add `<LDIdentify />` as the first child inside `<LDProvider>`. Remove `anonymous: true` from the context.
+Remove `anonymous: true` from the context — it interferes with individual targeting by key.
 
 ### Why This Works
-`ldClient.identify()` is the explicit SDK API for switching users at runtime — it sends the new context to LD, re-evaluates all flags for that identity, and updates React Context so `useFlags()` re-renders. The `context` prop on `LDProvider` is only reliable for the initial user at mount time, not for post-hydration updates.
+`withLDProvider` initializes the SDK client-side with an anonymous context. `ldClient.identify()` is the explicit SDK API for switching user identity at runtime — it sends the real context to LD, re-evaluates all flags, and updates React so `useFlags()` re-renders. This is the pattern documented in the official LD React SDK docs.
 
 ### How to Verify
 After the fix, the LD Live Events tab should show your real session UUID as the key, and the reason should be `TARGET_MATCH` when individual targeting is configured.

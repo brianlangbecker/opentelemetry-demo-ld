@@ -275,6 +275,30 @@ if browser_traffic_enabled:
                 except Exception as e:
                     logging.error(f"Error in add to cart task: {str(e)}")
 
+        @task
+        @pw
+        async def click_banner_cta(self, page: PageWithRetry):
+            try:
+                page.on("console", lambda msg: print(msg.text))
+                await page.route('**/*', add_baggage_header)
+                # Navigate first to establish an origin, then clear session so a new
+                # userId is generated. LD hashes the userId to assign a variation —
+                # different keys distribute across control/variant, enabling the experiment
+                # to collect clicks from both banner versions.
+                await page.goto("/", wait_until="domcontentloaded")
+                await page.evaluate("localStorage.removeItem('session')")
+                await page.goto("/", wait_until="domcontentloaded")
+                await page.wait_for_timeout(4000)  # let ldClient.identify() fire and flag evaluation return
+                cta = page.locator('button:has-text("Explore Now")')
+                if await cta.is_visible():
+                    await cta.click()
+                    await page.wait_for_timeout(6000)  # wait for LD SDK 5s flush interval
+                    logging.info("Banner CTA clicked — experiment conversion recorded")
+                else:
+                    logging.info("Banner CTA not visible — control variation, no conversion")
+            except Exception as e:
+                logging.error(f"Error in banner CTA task: {str(e)}")
+
 async def add_baggage_header(route: Route, request: Request):
     existing_baggage = request.headers.get('baggage', '')
     headers = {
