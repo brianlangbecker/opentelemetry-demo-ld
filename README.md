@@ -7,8 +7,8 @@ This is a fork of the [OpenTelemetry Astronomy Shop](https://github.com/open-tel
 ## Start Here
 
 1. [launchdarkly/SETUP.md](./launchdarkly/SETUP.md) — deploy and get running
-2. [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) — Part 1: Release & Remediate
-3. [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) — Part 2: Targeting
+2. [launchdarkly/docs/RELEASE-REMEDIATE.md](./launchdarkly/docs/RELEASE-REMEDIATE.md) — Part 1: Release & Remediate
+3. [launchdarkly/docs/TARGETING.md](./launchdarkly/docs/TARGETING.md) — Part 2: Targeting
 4. [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) — Part 3: Experimentation (extra credit)
 
 ## To Understand the Implementation

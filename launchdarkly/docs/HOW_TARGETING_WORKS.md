@@ -22,7 +22,7 @@ Your App (browser)
         → true (because isMobile = false matched)
               |
               v
-  useFlags() in your component gets { bannerV2Enabled: true }
+  ldClient.variation('banner-v2-enabled', false) returns true
   → BannerV2 renders
 ```
 
@@ -145,13 +145,13 @@ When `withLDProvider` mounts in `_app.tsx`:
 3. LD evaluates **all** flags for this user against all targeting rules
 4. LD returns the evaluated values for every flag
 5. These are cached locally in the SDK
-6. `useFlags()` reads from this local cache — no network call per hook invocation
+6. `ldClient.variation()` reads from this local cache — no network call per invocation
 
 When you toggle a flag in the LD dashboard:
 1. LD re-evaluates rules for all connected users
 2. Pushes new values over the SSE stream
 3. SDK updates local cache
-4. React re-renders components using `useFlags()`
+4. React re-renders components using `ldClient.variation()`
 
 ---
 

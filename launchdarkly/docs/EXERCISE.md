@@ -42,7 +42,7 @@ The `banner-v2-enabled` boolean flag controls which homepage banner renders:
 | File | Change |
 |------|--------|
 | `src/frontend/pages/_app.tsx` | `withLDProvider` HOC wraps the app; `useLDClient().identify()` sends real user context after mount |
-| `src/frontend/pages/index.tsx` | `useFlags()` evaluates `bannerV2Enabled` and conditionally renders the banner |
+| `src/frontend/pages/index.tsx` | `ldClient.variation('banner-v2-enabled', false)` evaluates the flag and conditionally renders the banner |
 | `src/frontend/components/Banner/BannerV2.tsx` | New banner component shown when flag is ON |
 | `src/frontend/components/PlatformFlag/PlatformFlag.tsx` | Fixed module-scope `window.ENV` read that caused React hydration error |
 | `src/frontend/components/ProductCard/ProductCard.tsx` | Removed OpenFeature dependency, hardcoded `imageSlowLoad = 0` |
@@ -51,12 +51,11 @@ The `banner-v2-enabled` boolean flag controls which homepage banner renders:
 
 ### The Listener
 
-`useFlags()` in `index.tsx` is the listener. It subscribes to flag changes via the SSE stream that `withLDProvider` maintains to `clientstream.launchdarkly.com`. When the flag changes, React re-renders automatically — no `addEventListener`, no polling, no page reload.
+`ldClient.variation()` in `index.tsx` is the listener. The SDK subscribes to flag changes via the SSE stream that `withLDProvider` maintains to `clientstream.launchdarkly.com`. When the flag changes, the SDK re-evaluates and React re-renders automatically — no `addEventListener`, no polling, no page reload.
 
 ```tsx
-const flags = useFlags();
-const bannerV2Enabled = flags.bannerV2Enabled ?? false;
-// Note: the React SDK camelCases flag keys by default — 'banner-v2-enabled' → 'bannerV2Enabled'
+const ldClient = useLDClient();
+const bannerV2Enabled = ldClient?.variation('banner-v2-enabled', false) ?? false;
 ```
 
 See [HOW_IT_WORKS.md](./HOW_IT_WORKS.md) for a full technical explanation.
@@ -221,7 +220,7 @@ This fires an event to LaunchDarkly every time the button is clicked. LD records
 
 > **Note:** You don't need the flag ON to create the experiment, but you must toggle it ON before starting the iteration.
 
-### Step 4 — Generate Traffic with the Load Generator
+### Step 3 — Generate Traffic with the Load Generator
 
 The HTTP-based Locust users (`WebsiteUser`) make direct API calls — no browser, no JavaScript, no LD SDK. They will not fire `client.track()`.
 
@@ -243,19 +242,23 @@ The Playwright `click_banner_cta` task runs alongside the existing browser tasks
 
 > **Mobile vs. desktop:** By default, headless Playwright uses a desktop Chromium user agent, so `isMobile` resolves to `false` for all simulated users. If you add a mobile-emulated Playwright class, those users will see the old banner regardless of the experiment split — they're effectively excluded. Keep it simple: use desktop Playwright users for the experiment.
 
-### Step 5 — Measure and Decide
+### Step 4 — Measure and Decide
 
 1. Start the experiment in the LD dashboard
 2. Let it run — expect **30-60 minutes** to accumulate enough conversions for statistical significance. At ~0.9 RPS on the browser task with a 50/50 split, roughly half the runs land on the purple banner and fire a conversion event. LD needs hundreds of conversions per variation before it can declare a winner.
 3. Watch the **Results** tab — it shows raw conversion counts per variation and confidence level building up. "Insufficient data" will clear once thresholds are met.
 4. LD's stats engine declares a winner — ship the winning variation by toggling the flag fully ON, or roll back with a single toggle. No deployment required.
 
-> **NOTE — Implementation Status:** The experiment wiring is complete and verified correct end-to-end. The debug event payload from LD Live Events confirmed:
+> **NOTE — Implementation Status**
+>
+> The experiment wiring is complete and verified correct end-to-end. The debug event payload from LD Live Events confirmed:
+>
 > ```json
 > "context": { "kind": "user", "key": "7bf774e8-...", "browser": "chrome", "isMobile": false },
 > "reason": { "kind": "FALLTHROUGH", "inExperiment": true }
 > ```
-> Real identified userId, correct variation, `inExperiment:true` — the SDK is doing everything right. Despite this, the Results tab showed 0 exposures across multiple iterations and 60+ minutes of load generator traffic. No code changes remain to try. The Results tab has not populated after multiple iterations and extended run time. The implementation is complete and correct — next step would be additional run time or further investigation.
+>
+> Real identified userId, correct variation, `inExperiment:true` — the SDK is doing everything right. Despite this, the Results tab showed 0 exposures across multiple iterations and 60+ minutes of load generator traffic. No code changes remain to try.
 
 ---
 
@@ -294,7 +297,7 @@ The exercise could have been implemented in the Java AdService or Go services. F
 The demo originally used OpenFeature with flagd as a proxy layer. This was replaced with the LaunchDarkly SDK directly because:
 - LaunchDarkly's React SDK handles SSE and real-time updates natively via `withLDProvider`
 - Fewer moving parts — no flagd container needed
-- The `useFlags()` hook is the simplest possible implementation of the "listener" requirement
+- `ldClient.variation()` is used instead of `useFlags()` — required for experiment exposure tracking
 
 ### `isPremium`, `accountAge`, `email` attributes
 

@@ -39,8 +39,8 @@ LaunchDarkly has three different keys — each serves a different purpose:
 | **API access token** | Account settings → Authorization → Create token (Writer role) | REST API calls — turning flags on/off programmatically via curl or webhooks. Keep private. |
 
 For this integration you need two:
-- **Client-side ID** — for the deploy script (Step 2)
-- **API access token** — for the remediate curl command (Step 6)
+- **Client-side ID** — for the deploy script (Step 3)
+- **API access token** — for the remediate curl command (Step 7)
 
 ### Get the Client-side ID
 

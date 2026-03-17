@@ -47,7 +47,7 @@ It does two things when the app mounts:
 1. **Opens an SSE stream** to `clientstream.launchdarkly.com` using your `clientSideID` — this is the persistent connection that receives real-time flag updates.
 2. **Initializes with an anonymous context** until `identify()` is called with the real user.
 
-Because `withLDProvider` wraps `MyApp`, every component in the tree — including `MyApp` itself — can call `useLDClient()` and `useFlags()` directly.
+Because `withLDProvider` wraps `MyApp`, every component in the tree — including `MyApp` itself — can call `useLDClient()` directly.
 
 ---
 
@@ -82,7 +82,7 @@ This context is sent to LaunchDarkly so it can evaluate targeting rules per user
 
 `withLDProvider` initializes client-side only, but `localStorage` and `navigator` are still not available at module load time. `identify()` is called inside `useEffect`, which only runs in the browser after mount — the correct place for any client-only data.
 
-`identify()` is also the explicit SDK API for switching user identity at runtime. It re-evaluates all flags for the new context and updates React state, so `useFlags()` re-renders with the correct values.
+`identify()` is also the explicit SDK API for switching user identity at runtime. It re-evaluates all flags for the new context and updates React state so components re-render with the correct values.
 
 ### Why not `email`, `isPremium`, `accountAge`?
 
@@ -139,9 +139,9 @@ When you toggle `banner-v2-enabled` in the LaunchDarkly dashboard:
 1. LD servers receive the flag change
 2. LD pushes the update over SSE to all connected clients (including your browser)
 3. The LD SDK receives the update, re-evaluates flags for the current user context
-4. `LDProvider` updates its React Context value with the new flag state
+4. `withLDProvider` updates its React Context value with the new flag state
 5. React detects the Context change, re-renders `Home` component
-6. `useFlags()` returns the new flag value
+6. `ldClient.variation()` returns the new flag value
 7. `bannerV2Enabled` flips from `false` to `true` (or vice versa)
 8. React renders `<BannerV2 />` instead of `<Banner />` (or vice versa)
 
@@ -163,7 +163,7 @@ Simple ternary. When the flag is ON, the new component renders. When OFF, the or
 
 ## What "No Page Reload" Actually Means
 
-The SSE stream `LDProvider` opens lives for the lifetime of the browser tab. It doesn't require HTTP polling or manual reconnection. When the flag changes in LD:
+The SSE stream `withLDProvider` opens lives for the lifetime of the browser tab. It doesn't require HTTP polling or manual reconnection. When the flag changes in LD:
 
 - The server **pushes** the update to the client (server-sent, not client-polled)
 - React's reactivity system handles the UI update
@@ -177,39 +177,83 @@ This is the core "instant release/rollback" capability.
 
 ---
 
-## Appendix: Next.js SSR and Hydration-Safe State
+## Part 2 — How Targeting Works
 
-### Why `withLDProvider` avoids the hydration problem
+Once `identify()` sends the user context to LD, targeting rules in the dashboard evaluate that context to decide what flag value to serve. No code changes are needed to add or change rules — it all happens in the LD dashboard.
 
-`withLDProvider` initializes the SDK at `componentDidMount` — client-side only. It never renders anything during SSR, so there is no server/client HTML mismatch from the LD layer.
+### The attributes in play
 
-Earlier iterations of this integration used `<LDProvider context={ldContext}>` as a JSX wrapper with a `useState` placeholder. This caused React hydration error #418 because values like `session.userId` differed between server and client renders. `withLDProvider` sidesteps this entirely by not involving the server at all.
+| Attribute | Value | Targeting use |
+|-----------|-------|---------------|
+| `key` | session UUID | Individual targeting — serves a specific user |
+| `isMobile` | `true` / `false` | Desktop-only rollout while mobile layout is reviewed |
+| `browser` | `chrome`, `firefox`, etc. | Browser-specific rollout |
+| `currencyCode` | `USD`, `EUR`, etc. | Regional rollout |
 
-### Why session.userId can't be read at module scope
+### Rule evaluation order
 
-`SessionGateway` calls `uuid.v4()` at **module load time**:
+LD evaluates rules top to bottom, first match wins:
 
-```ts
-const defaultSession = {
-  userId: v4(),  // runs when module is imported — once on server, once on client
-  currencyCode: 'USD',
-};
+```
+Individual targets  →  checked first, overrides everything
+Custom rules        →  checked in order (e.g. isMobile = false → true)
+Default rule        →  fallback for everyone else
 ```
 
-Next.js imports the module twice: once in the Node.js server process, once in the browser. Each call to `v4()` produces a different UUID. Any component that reads this value at render time will get different output on server vs client — causing React error #418.
+A user matched by an individual target never hits the custom rules. A desktop user not individually targeted hits the `isMobile = false` rule and gets `true`. A mobile user falls through to the default.
 
-This is why `identify()` is called inside `useEffect`, not at render time.
+### How it flows
 
-### The general rule
+1. Page loads → `withLDProvider` initializes with anonymous context
+2. `useEffect` fires → `ldClient.identify()` sends real user attributes to LD
+3. LD re-evaluates all flags for this user against all targeting rules
+4. SDK updates local cache, React re-renders with correct flag values
+5. Dashboard rule change → SSE pushes update → SDK re-evaluates → instant UI update
 
-Any value that differs between server and client must start as a static placeholder:
+---
 
-| Value | Problem | Solution |
-|-------|---------|----------|
-| `localStorage` reads | doesn't exist on server | read in `useEffect` |
-| `navigator.userAgent` | doesn't exist on server | read in `useEffect` |
-| `uuid.v4()` at module scope | different UUID each import | static placeholder, update in `useEffect` |
-| `Date.now()` | millisecond difference | static placeholder, update in `useEffect` |
-| `window.innerWidth` | doesn't exist on server | static placeholder, update in `useEffect` |
+## Part 3 — How Experimentation Works
 
-The `useEffect` always runs after hydration completes and only in the browser, making it the safe place for any client-only reads.
+The experiment measures whether the purple banner (`true` variation) drives more CTA clicks than the gray banner (`false` variation).
+
+### Conversion tracking — `client.track()`
+
+**File:** `src/frontend/components/Banner/BannerV2.tsx`
+
+```tsx
+const ldClient = useLDClient();
+<button onClick={() => ldClient?.track('banner-cta-clicked')}>Explore Now</button>
+```
+
+When the button is clicked, `track()` fires a custom event to LD. LD records which flag variation that user was assigned to at the time — this is the conversion event the experiment measures.
+
+### Exposure tracking — why `variation()` is required
+
+For LD to count a user as an experiment exposure, the SDK must fire an `index` event when the flag is evaluated. `variation()` guarantees this. `useFlags()` (which calls `allFlags()` internally) may not send exposure events in all configurations.
+
+```tsx
+// This registers an exposure event — required for experiment tracking
+const bannerV2Enabled = ldClient?.variation('banner-v2-enabled', false) ?? false;
+```
+
+### What LD needs to record a result
+
+1. **Exposure** — `variation()` called → `index` event sent with `inExperiment: true`
+2. **Conversion** — user clicks CTA → `track('banner-cta-clicked')` fires
+3. **Association** — LD links the conversion to the variation the user was assigned
+
+Without the exposure event, LD cannot associate the conversion to a variation — Results tab shows 0 regardless of how many clicks occur.
+
+### Verifying the wiring
+
+In browser DevTools → Network tab → `events.launchdarkly.com` POST payload should contain:
+
+```json
+"reason": { "kind": "FALLTHROUGH", "inExperiment": true }
+```
+
+In LD Live Events, you should see both `feature` events (exposures) and `custom` events (`banner-cta-clicked`) flowing.
+
+---
+
+> For details on Next.js SSR hydration issues encountered during development, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) and [DEBUGGING_JOURNAL.md](./DEBUGGING_JOURNAL.md).

@@ -25,7 +25,7 @@ Toggling the flag in the LaunchDarkly dashboard instantly swaps the banner with 
 |------|---------------|
 | [SETUP.md](./SETUP.md) | Step-by-step setup from zero to running |
 | [docs/EXERCISE.md](./docs/EXERCISE.md) | Exercise requirements mapped to implementation |
-| [docs/HOW_IT_WORKS.md](./docs/HOW_IT_WORKS.md) | Technical deep dive: LDProvider, useFlags, WebSocket listener, context |
+| [docs/HOW_IT_WORKS.md](./docs/HOW_IT_WORKS.md) | Technical deep dive: withLDProvider, variation(), SSE listener, user context |
 | [docs/HOW_TARGETING_WORKS.md](./docs/HOW_TARGETING_WORKS.md) | How targeting attributes are evaluated: rules, operators, rollouts |
 | [docs/TARGETING.md](./docs/TARGETING.md) | User context, custom attributes, browser/mobile targeting in this app |
 | [docs/RELEASE-REMEDIATE.md](./docs/RELEASE-REMEDIATE.md) | Programmatic flag triggers via curl and the LD REST API |
@@ -50,7 +50,7 @@ Toggling the flag in the LaunchDarkly dashboard instantly swaps the banner with 
 ```
 src/frontend/
   pages/_app.tsx                      # LDProvider wraps app with user context
-  pages/index.tsx                     # useFlags() evaluates banner-v2-enabled
+  pages/index.tsx                     # ldClient.variation() evaluates banner-v2-enabled
   components/Banner/BannerV2.tsx      # New banner component (flag = ON)
   components/ProductCard/ProductCard.tsx  # Removed OpenFeature dependency
   Dockerfile                          # Accepts NEXT_PUBLIC_LD_CLIENT_ID as build arg
