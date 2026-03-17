@@ -8,6 +8,9 @@ const BannerV2 = () => {
   const ldClient = useLDClient();
 
   const handleCtaClick = () => {
+    // Fires a conversion event for the experiment metric.
+    // The event key 'banner-cta-clicked' must match the metric defined in the LD experiment.
+    // Create the experiment in LD: Experiments → Create → metric event key = 'banner-cta-clicked'
     ldClient?.track('banner-cta-clicked');
     window.location.hash = '#hot-products';
   };

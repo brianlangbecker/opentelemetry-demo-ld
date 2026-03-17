@@ -30,6 +30,9 @@ if (typeof window !== 'undefined') {
 
 const queryClient = new QueryClient();
 
+// Client-side ID is baked in at build time via the deploy script:
+// LD_CLIENT_ID="your-client-side-id" ./launchdarkly/scripts/deploy-k8s.sh
+// Find your client-side ID in the LD dashboard: Project → Environments → click environment
 const ldClientID = process.env.NEXT_PUBLIC_LD_CLIENT_ID || 'your-client-side-id-here';
 
 const getBrowser = () => {
@@ -84,6 +87,6 @@ export default withLDProvider({
     evaluationReasons: true, // required for experiment exposure tracking — tells LD why a user received a flag value
   },
   reactOptions: {
-    sendEventsOnFlagRead: true, // required for experiment exposures — sends evaluation events when useFlags() reads a flag
+    sendEventsOnFlagRead: true, // required for experiment exposures — sends evaluation events on flag reads
   },
 })(MyApp as any);
