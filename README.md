@@ -2,37 +2,23 @@
 
 This is a fork of the [OpenTelemetry Astronomy Shop](https://github.com/open-telemetry/opentelemetry-demo) extended with a LaunchDarkly feature flag integration for the SE technical exercise.
 
-**What was added:** A boolean flag (`banner-v2-enabled`) controls which homepage banner renders in the Next.js frontend. Toggling the flag in the LaunchDarkly dashboard swaps the banner instantly — no page reload, no redeployment.
+**Start here:** [`launchdarkly/`](./launchdarkly/)
 
-| Flag State | What You See |
-|------------|-------------|
-| OFF | Original banner — gray, "The best telescopes to see the world closer" |
-| ON | New banner — purple gradient, "Experience the New Telescope Collection" |
+## Start Here
 
-## Quick Start
+1. [launchdarkly/SETUP.md](./launchdarkly/SETUP.md) — deploy and get running
+2. [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) — Part 1: Release & Remediate
+3. [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) — Part 2: Targeting
+4. [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) — Part 3: Experimentation (extra credit)
 
-```bash
-# 1. Deploy (bakes the LD client-side ID into the frontend image)
-LD_CLIENT_ID="your-client-side-id" ./launchdarkly/scripts/deploy-k8s.sh
+## To Understand the Implementation
 
-# 2. Create the flag in the LD dashboard: boolean, key = banner-v2-enabled
-
-# 3. Toggle it ON — banner swaps instantly at http://localhost:8080
-```
-
-## Documentation
-
-All integration docs and scripts are in the [`launchdarkly/`](./launchdarkly/) directory:
-
-| Document | What It Covers |
-|----------|---------------|
-| [launchdarkly/SETUP.md](./launchdarkly/SETUP.md) | Step-by-step setup: keys, deploy, create flag, toggle, remediate |
-| [launchdarkly/docs/EXERCISE.md](./launchdarkly/docs/EXERCISE.md) | Exercise requirements mapped to the implementation |
-| [launchdarkly/docs/HOW_IT_WORKS.md](./launchdarkly/docs/HOW_IT_WORKS.md) | Technical deep dive: LDProvider, useFlags, SSE, hydration |
-| [launchdarkly/docs/RELEASE-REMEDIATE.md](./launchdarkly/docs/RELEASE-REMEDIATE.md) | Full release and remediate demo sequence with curl commands |
-| [launchdarkly/docs/TARGETING.md](./launchdarkly/docs/TARGETING.md) | User context attributes and targeting rules |
-| [launchdarkly/docs/DEBUGGING_JOURNAL.md](./launchdarkly/docs/DEBUGGING_JOURNAL.md) | Step-by-step record of debugging the integration |
-| [launchdarkly/docs/TROUBLESHOOTING.md](./launchdarkly/docs/TROUBLESHOOTING.md) | Common errors and fixes |
+- [launchdarkly/docs/HOW_IT_WORKS.md](./launchdarkly/docs/HOW_IT_WORKS.md) — SDK, SSE, flag evaluation, user context
+- [launchdarkly/docs/HOW_TARGETING_WORKS.md](./launchdarkly/docs/HOW_TARGETING_WORKS.md) — how targeting rules are evaluated
+- [launchdarkly/docs/RELEASE-REMEDIATE.md](./launchdarkly/docs/RELEASE-REMEDIATE.md) — curl commands and remediation talking points
+- [launchdarkly/docs/TARGETING.md](./launchdarkly/docs/TARGETING.md) — full targeting demo sequence
+- [launchdarkly/docs/TROUBLESHOOTING.md](./launchdarkly/docs/TROUBLESHOOTING.md) — common errors and fixes
+- [launchdarkly/docs/DEBUGGING_JOURNAL.md](./launchdarkly/docs/DEBUGGING_JOURNAL.md) — what broke and how it was fixed
 
 ---
 

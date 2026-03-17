@@ -1,23 +1,32 @@
 # Setup Guide — LaunchDarkly Integration
 
+> **Note:** This integration was built and tested on Kubernetes (Docker Desktop). The Docker Compose path has not been fully validated.
+
 ---
 
 ## Prerequisites
 
-- LaunchDarkly trial account — [sign up here](https://launchdarkly.com/start-trial/)
-- OTel demo running via Helm in Docker Desktop:
-  ```bash
-  helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-  helm install my-otel-demo open-telemetry/opentelemetry-demo
-  ```
-- Fix collector startup errors on Docker Desktop (symlink/hostmetrics issues):
-  ```bash
-  ./launchdarkly/scripts/fix-collector.sh
-  ```
+- Docker Desktop with Kubernetes enabled
+- `helm` and `kubectl` installed
 
 ---
 
-## Step 1: Sign Up and Get Your Keys
+## Step 1: Install the OTel Demo
+
+```bash
+helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+helm install my-otel-demo open-telemetry/opentelemetry-demo
+```
+
+Then fix collector startup errors (symlink/hostmetrics issues on Docker Desktop):
+
+```bash
+./launchdarkly/scripts/fix-collector.sh
+```
+
+---
+
+## Step 2: Sign Up and Get Your Keys
 
 1. Sign up at https://launchdarkly.com/start-trial/ and log in
 
@@ -39,19 +48,9 @@ Go to your project → **Environments** → click your environment → copy the 
 
 ---
 
-## Step 2: Build and Deploy
+## Step 3: Build and Deploy
 
-The scripts bake `NEXT_PUBLIC_LD_CLIENT_ID` into the frontend image at build time, then swap the running frontend deployment to use it.
-
-> **Note:** If you run `fix-collector.sh` after deploying the frontend, Helm will revert the frontend image back to upstream. Re-run the deploy script afterward.
-
-### Docker
-
-```bash
-LD_CLIENT_ID="your-client-side-id" ./launchdarkly/scripts/deploy-docker.sh
-```
-
-### Kubernetes
+With your client-side ID in hand, run the deploy script. It builds the frontend image with the LD client ID baked in and redeploys it:
 
 ```bash
 LD_CLIENT_ID="your-client-side-id" ./launchdarkly/scripts/deploy-k8s.sh
@@ -59,9 +58,11 @@ LD_CLIENT_ID="your-client-side-id" ./launchdarkly/scripts/deploy-k8s.sh
 
 The script builds the image, updates the frontend deployment, waits for rollout, then prompts to start port-forwarding at `http://localhost:8080`.
 
+> **Note:** The first build can take 10-20 minutes — it downloads the base Node image and installs all npm dependencies. Subsequent builds are much faster thanks to Docker layer caching.
+
 ---
 
-## Step 3: Create the Feature Flag
+## Step 4: Create the Feature Flag
 
 Once the frontend is running and connected, create the flag:
 
@@ -74,7 +75,7 @@ Once the frontend is running and connected, create the flag:
 
 ---
 
-## Step 4: Toggle the Flag
+## Step 5: Toggle the Flag
 
 The app maintains a live SSE (Server-Sent Events) connection to LaunchDarkly. Flag changes take effect instantly with no page reload or redeployment.
 
@@ -92,7 +93,7 @@ This is the core of the demo — a feature change or rollback with zero deployme
 
 ---
 
-## Step 5: Individual Targeting — Test It Yourself First
+## Step 6: Individual Targeting — Test It Yourself First
 
 Before releasing to anyone else, target only your own browser session to verify the flag works. This is individual targeting.
 
@@ -133,7 +134,7 @@ See [docs/TARGETING.md](./docs/TARGETING.md) for full dashboard steps for each s
 
 ---
 
-## Step 6: Remediate via curl
+## Step 7: Remediate via curl
 
 Use your **API access token** (not the client-side ID) to turn the flag off programmatically:
 
@@ -141,7 +142,7 @@ Use your **API access token** (not the client-side ID) to turn the flag off prog
 curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enabled \
   -H "Authorization: api-YOUR-API-ACCESS-TOKEN" \
   -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
-  -d '{"instructions": [{"kind": "turnFlagOff"}]}'
+  -d '{"instructions": [{"kind": "turnFlagOff"}], "environmentKey": "test"}'
 ```
 
 If you haven't created an API access token yet: **Account settings → Authorization → Create token → Writer role**.
