@@ -60,36 +60,15 @@ Console shows: `Uncaught Error: Minified React error #418`
 ### Cause
 Next.js renders the page on the server first, then React "hydrates" it on the client. If the server-rendered HTML doesn't match what React tries to render client-side, hydration fails.
 
-In our case, `browser` and `isMobile` context attributes use `navigator.userAgent` which doesn't exist server-side. The server renders `browser: 'unknown'` but the client renders `browser: 'firefox'` — mismatch.
+Two things caused this in earlier iterations of this integration:
 
-### Root cause
-`SessionGateway` calls `uuid.v4()` at **module load time** to create `defaultSession.userId`. Since Next.js imports the module separately on the server and the client, each gets a different random UUID. `_app.tsx` used to pass `session.userId` as the `key` in the initial `ldContext` state — server renders with UUID `abc`, client hydrates with UUID `xyz`, React detects the mismatch, throws #418, and `LDProvider` re-mounts from scratch. By the time it re-initializes, the flag stream hasn't arrived yet so `useFlags()` returns `false`.
+1. `SessionGateway` calls `uuid.v4()` at module load time — Next.js imports the module separately on the server and the client, producing different UUIDs. Any component reading `session.userId` at render time gets different output server vs client.
+2. `PlatformFlag.tsx` read `window.ENV` at module scope — `window` doesn't exist on the server, so the server rendered `local` while the client rendered `kubernetes`. One mismatched text node is enough to trigger #418.
 
-### Fix
-The initial `ldContext` state must be **fully static** — no session reads, no `navigator` reads. Move all dynamic data into `useEffect` so it only runs client-side after hydration succeeds:
+### Fix (current implementation)
+`withLDProvider` initializes the SDK at `componentDidMount` — client-side only. It never runs during SSR, so there is no hydration conflict from the LD layer. `ldClient.identify()` is called inside `useEffect`, which only runs after hydration succeeds. `PlatformFlag.tsx` was fixed to read `window.ENV` inside `useEffect` as well.
 
-```tsx
-const [ldContext, setLdContext] = useState({
-  kind: 'user' as const,
-  key: 'anonymous-user',  // static — matches server render
-  anonymous: true,
-  currencyCode: 'USD',    // static default — matches server render
-  browser: 'unknown',     // matches server render
-  isMobile: false,        // matches server render
-});
-
-useEffect(() => {
-  const session = SessionGateway.getSession();
-  setLdContext({
-    kind: 'user',
-    key: session.userId,
-    anonymous: true,
-    currencyCode: session.currencyCode,
-    browser: getBrowser(),
-    isMobile: /Mobi|Android/i.test(navigator.userAgent),
-  });
-}, []);
-```
+See `DEBUGGING_JOURNAL.md` for the full investigation.
 
 ---
 

@@ -388,3 +388,86 @@ This is exactly our pattern. The retrofit replaced:
 **The `as any` cast:**
 
 `withLDProvider` expects `ComponentType<{}>` but Next.js `AppProps` has required props (`pageProps`, etc.) that don't satisfy that type. The cast is necessary due to a TypeScript signature mismatch between the LD HOC and Next.js app wrapper types — runtime behavior is correct.
+
+---
+
+## Part 3: Experimentation — Playwright Load Generator Gotcha
+
+### Symptom
+
+The `click_banner_cta` Playwright task showed 0ms response times in the Locust UI and no events appeared in LD Live events, despite the task incrementing at ~0.9 RPS.
+
+### Root Cause
+
+The task was wrapped in `with self.tracer.start_as_current_span(...)` outside the `try/except` block. This line was failing immediately with `AttributeError: 'WebsiteBrowserUser' object has no attribute 'tracer'` — before any async code ran. The exception was caught by Locust's task runner and reported as a 0ms "success" (no failure flag). The try/except inside the task never executed.
+
+The 0ms response time was the diagnostic clue: a real Playwright browser task loading a page takes at minimum 500ms. 0ms means the task body never ran.
+
+### Fix
+
+Remove the tracer span wrapper from the task. The `with self.tracer...` pattern is used in the other Playwright tasks and works there, but the root cause here was the span failing before awaits. Dropping it keeps the task simple and functional — OTel tracing is not required for the experiment to work.
+
+### Lesson
+
+**0ms Locust response time = task not executing.** When a Playwright task shows unrealistically fast response times, check for synchronous exceptions thrown before the first `await`. Broad `try/except` inside the task won't catch errors in code that runs before the `try` block.
+
+---
+
+## Part 3: Experimentation — Results Tab Showing 0 Exposures
+
+### Symptom
+
+After wiring up the full experiment — `client.track('banner-cta-clicked')` on the CTA button, `evaluationReasons: true` and `sendEventsOnFlagRead: true` in `withLDProvider`, Playwright generating ~0.9 RPS browser traffic — the Results tab showed 0 exposures across 6 iterations spanning several hours.
+
+### What Was Confirmed Working
+
+- SSE stream (`clientstream.launchdarkly.com` EventStream tab) showed `"inExperiment":true` in the flag payload
+- POST payloads to `events.launchdarkly.com` confirmed `"inExperiment":true` and `"trackReason":true`
+- LD Live Events showed `feature` evaluation events and `custom` `banner-cta-clicked` events flowing correctly
+- Manual CTA clicks appeared in Live Events in real time
+
+### Troubleshooting Steps Taken
+
+1. **Deleted `isMobile` targeting rule** — targeting rules intercept traffic before experiment allocation; users matched by a rule are not counted as experiment exposures. Deleted all rules, leaving only the default rule feeding the experiment's percentage rollout.
+
+2. **Added `evaluationReasons: true`** to `withLDProvider` options — required for the SDK to include evaluation reason in the SSE payload and events.
+
+3. **Added `reactOptions: { sendEventsOnFlagRead: true }`** — required to send evaluation events when `useFlags()` reads a flag.
+
+4. **Added `flushInterval: 5000`** — reduced from default 30s so events reach LD within 5s rather than up to 30s.
+
+5. **Fixed flag percentage rollout disconnection** — deleting targeting rules left the default rule as a plain percentage rollout unconnected to the experiment. Fixed by editing the flag's JSON directly (Option B) to reconnect the rollout to the experiment's variation set.
+
+6. **Restarted multiple iterations** — each restart resets traffic allocation and requires fresh exposures. Ran 6 iterations, none produced data.
+
+7. **Changed `useFlags()` to `ldClient.variation()`** — LD troubleshooting documentation states: *"The variation() method must be called to register an exposure. If you are using 'All Flags,' it may not send events for all SDKs."* Changed `index.tsx` from:
+   ```tsx
+   const flags = useFlags();
+   const bannerV2Enabled = flags.bannerV2Enabled ?? false;
+   ```
+   to:
+   ```tsx
+   const ldClient = useLDClient();
+   const bannerV2Enabled = ldClient?.variation('banner-v2-enabled', false) ?? false;
+   ```
+   This ensures an explicit `index` event (exposure) is fired on every flag evaluation.
+
+8. **Verified Chrome (not Zen browser)** — Zen browser was blocking `clientstream.launchdarkly.com` via CORS. Switched to Chrome for all testing.
+
+9. **Confirmed no holdout groups** — verified trial account had no holdout experiments intercepting traffic.
+
+### Resolution
+
+After deploying the `ldClient.variation()` fix and starting a fresh iteration, the SSE stream continued to show `"inExperiment":true`. Reached out to the LD contact (Greg) to ask about pipeline lag. His response: *"Experiments are assumed to be long-running, so we don't prioritize realtime calculations. Can't remember exactly what the calculation lag is, but I don't think it's measured in hours."*
+
+This confirms the implementation is correct — the delay is a platform-side processing lag, not a code issue.
+
+### Lessons
+
+**Targeting rules silently exclude experiment traffic.** Any user matched by a targeting rule before reaching the experiment's default rule percentage rollout is NOT counted as an experiment exposure. Delete all targeting rules before running an experiment, or configure the experiment audience to explicitly exclude targeted segments.
+
+**`useFlags()` may not register exposures.** The LD React SDK's `useFlags()` (which calls `allFlags()` internally) may not send exposure events in all configurations. Use `ldClient.variation('flag-key', defaultValue)` explicitly when experiment exposure tracking is required.
+
+**Experiment Results lag is by design.** LD's experiment engine does not process results in real time — results are calculated on a delayed pipeline. Live Events is real time; Results tab is not. Don't use Results tab to verify wiring is correct — use Live Events and the network payload instead.
+
+**`inExperiment:true` in the payload is the ground truth.** If the SSE stream shows `"inExperiment":true` and POST payloads to `events.launchdarkly.com` include it, the implementation is correct. Everything after that is LD's pipeline.

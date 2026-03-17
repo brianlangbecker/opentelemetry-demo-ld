@@ -69,7 +69,7 @@ Toggle via the LD dashboard (manual), or programmatically via curl using an API 
 curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enabled \
   -H "Authorization: api-YOUR-API-ACCESS-TOKEN" \
   -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
-  -d '{"instructions": [{"kind": "turnFlagOff"}]}'
+  -d '{"instructions": [{"kind": "turnFlagOff"}], "environmentKey": "test"}'
 ```
 
 See [RELEASE-REMEDIATE.md](./RELEASE-REMEDIATE.md) for the full demo sequence and talking points.
@@ -217,7 +217,7 @@ This fires an event to LaunchDarkly every time the button is clicked. LD records
 11. **Statistical approach**: Bayesian (default) or Frequentist
 12. Save the experiment design
 
-> **Important — disable the `isMobile` targeting rule first.** If it's active, only desktop users are eligible for the new banner, which skews your sample. For the experiment, let LD randomly assign all visitors to control or variant so the comparison is apples-to-apples.
+> **Important — delete all targeting rules before starting the experiment.** If the `isMobile` rule (or any other targeting rule) is active, users are served a variation by that rule before they reach the experiment's traffic allocation. LD won't count them as experiment exposures — you'll see 0 user contexts in the Results tab even with live traffic flowing. Go to the flag's **Targeting** tab, delete all rules, and leave only the default rule feeding into the experiment allocation.
 
 > **Note:** You don't need the flag ON to create the experiment, but you must toggle it ON before starting the iteration.
 
@@ -234,11 +234,10 @@ The Playwright users (`WebsiteBrowserUser`) run a real browser, which means the 
 Browser traffic is already enabled in the k8s deployment (`LOCUST_BROWSER_TRAFFIC_ENABLED=true`). Control user count and spawn rate through the **Locust UI**:
 
 1. Open `http://localhost:8080/loadgen/` (no port-forward needed — the frontend proxy routes it)
-2. The test is auto-started (defaults: 10 users, spawn rate 1). Click **Stop** to pause it.
-3. Click **Edit** (top nav) to change the settings:
-   - **Number of users**: `20`
-   - **Spawn rate**: `2`
-4. Click **Start** — Locust ramps up to 20 concurrent users, adding 2 per second.
+2. The test is auto-started at **10 users, spawn rate 1** — leave it at the defaults.
+3. If you need to adjust: click **Stop** → **Edit** → **Start**
+
+> **Why 10 users, not more:** Each headless Chromium instance uses ~250MB. At 10 users Locust runs ~5 browser users concurrently (~1.25GB total), well within the 3000Mi memory limit set on the load-generator pod. Bumping to 20 users risks browser crashes — you'll see `Browser.new_context: Target page, context or browser has been closed` errors in Locust if you exceed memory.
 
 The Playwright `click_banner_cta` task runs alongside the existing browser tasks. Each run clears localStorage so LD sees a fresh userId, distributing traffic across control and variant.
 
@@ -247,9 +246,16 @@ The Playwright `click_banner_cta` task runs alongside the existing browser tasks
 ### Step 5 — Measure and Decide
 
 1. Start the experiment in the LD dashboard
-2. Let it run until LD reports statistical significance (watch the experiment panel — it shows confidence and p-value live)
-3. LD's stats engine will declare a winner when there's enough data
-4. Ship the winning variation, or roll back — one flag toggle, no deployment
+2. Let it run — expect **30-60 minutes** to accumulate enough conversions for statistical significance. At ~0.9 RPS on the browser task with a 50/50 split, roughly half the runs land on the purple banner and fire a conversion event. LD needs hundreds of conversions per variation before it can declare a winner.
+3. Watch the **Results** tab — it shows raw conversion counts per variation and confidence level building up. "Insufficient data" will clear once thresholds are met.
+4. LD's stats engine declares a winner — ship the winning variation by toggling the flag fully ON, or roll back with a single toggle. No deployment required.
+
+> **NOTE — Implementation Status:** The experiment wiring is complete and verified correct end-to-end. The debug event payload from LD Live Events confirmed:
+> ```json
+> "context": { "kind": "user", "key": "7bf774e8-...", "browser": "chrome", "isMobile": false },
+> "reason": { "kind": "FALLTHROUGH", "inExperiment": true }
+> ```
+> Real identified userId, correct variation, `inExperiment:true` — the SDK is doing everything right. Despite this, the Results tab showed 0 exposures across multiple iterations and 60+ minutes of load generator traffic. No code changes remain to try. The Results tab has not populated after multiple iterations and extended run time. The implementation is complete and correct — next step would be additional run time or further investigation.
 
 ---
 

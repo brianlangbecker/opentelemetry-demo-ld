@@ -81,5 +81,9 @@ export default withLDProvider({
   clientSideID: ldClientID,
   options: {
     flushInterval: 5000, // flush events every 5s instead of 30s — needed for Playwright experiment traffic
+    evaluationReasons: true, // required for experiment exposure tracking — tells LD why a user received a flag value
+  },
+  reactOptions: {
+    sendEventsOnFlagRead: true, // required for experiment exposures — sends evaluation events when useFlags() reads a flag
   },
 })(MyApp as any);

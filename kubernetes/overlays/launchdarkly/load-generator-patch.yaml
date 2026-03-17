@@ -7,4 +7,9 @@ spec:
     spec:
       containers:
       - name: load-generator
-        image: ghcr.io/YOUR_GITHUB_ORG/otel-demo-load-generator:ld
+        image: ghcr.io/open-telemetry/demo:latest-load-generator
+        resources:
+          requests:
+            memory: "3000Mi"
+          limits:
+            memory: "3000Mi"

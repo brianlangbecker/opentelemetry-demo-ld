@@ -286,7 +286,7 @@ if browser_traffic_enabled:
                 # different keys distribute across control/variant, enabling the experiment
                 # to collect clicks from both banner versions.
                 await page.goto("/", wait_until="domcontentloaded")
-                await page.evaluate("localStorage.removeItem('session')")
+                await page.evaluate("localStorage.clear()")
                 await page.goto("/", wait_until="domcontentloaded")
                 await page.wait_for_timeout(4000)  # let ldClient.identify() fire and flag evaluation return
                 cta = page.locator('button:has-text("Explore Now")')

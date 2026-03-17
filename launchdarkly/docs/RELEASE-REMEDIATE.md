@@ -69,10 +69,12 @@ You need an **API key** with write permissions — this is different from the cl
 curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enabled \
   -H "Authorization: api-YOUR-API-KEY" \
   -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
-  -d '{"instructions": [{"kind": "turnFlagOff"}]}'
+  -d '{"instructions": [{"kind": "turnFlagOff"}], "environmentKey": "test"}'
 ```
 
 Replace `api-YOUR-API-KEY` with your actual API token.
+
+> **Environment key:** Use `"test"` — this is the environment where the flag is configured. The token must have **Writer** role (not Reader) to modify flags.
 
 ### What the Parts Mean
 
@@ -112,7 +114,7 @@ Use this to walk through the complete release → incident → remediate story:
 curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enabled \
   -H "Authorization: api-YOUR-API-KEY" \
   -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
-  -d '{"instructions": [{"kind": "turnFlagOn"}]}'
+  -d '{"instructions": [{"kind": "turnFlagOn"}], "environmentKey": "test"}'
 
 # (Show the new purple banner in the browser — feature is live)
 
@@ -120,7 +122,7 @@ curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enable
 curl -X PATCH https://app.launchdarkly.com/api/v2/flags/default/banner-v2-enabled \
   -H "Authorization: api-YOUR-API-KEY" \
   -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
-  -d '{"instructions": [{"kind": "turnFlagOff"}]}'
+  -d '{"instructions": [{"kind": "turnFlagOff"}], "environmentKey": "test"}'
 
 # (Show the original banner instantly restored — no deployment)
 ```

@@ -15,11 +15,11 @@ LaunchDarkly Dashboard
         |
         | SSE — Server-Sent Events (persistent stream)
         |
-  LDProvider (_app.tsx)
+  withLDProvider (_app.tsx)
         |
         | React Context
         |
-  useFlags() (index.tsx)
+  ldClient.variation() (index.tsx)
         |
         | re-render
         |
@@ -105,40 +105,30 @@ Parses `navigator.userAgent` to detect the browser. Used as a targeting attribut
 
 ---
 
-## useFlags() — The Listener
+## ldClient.variation() — The Listener
 
 **File:** `src/frontend/pages/index.tsx`
 
 ```tsx
-const flags = useFlags();
-const bannerV2Enabled = flags['banner-v2-enabled'] ?? false;
+const ldClient = useLDClient();
+const bannerV2Enabled = ldClient?.variation('banner-v2-enabled', false) ?? false;
 ```
 
-`useFlags()` is a React hook from `launchdarkly-react-client-sdk`. It:
+`useLDClient()` returns the LD client instance from React Context. `variation()` evaluates the flag for the current user and returns the value. It also registers an **exposure event** — a record that this user was shown a particular flag variation. This is required for experiment tracking.
 
-1. **Reads from the React Context** that `LDProvider` manages — no network call happens here.
-2. **Subscribes to flag changes** — when `LDProvider` receives a flag update over SSE, it updates Context, which triggers a re-render in any component using `useFlags()`.
+When the flag changes in LD, the SSE stream pushes the update, the SDK re-evaluates, and React re-renders the component — same as `useFlags()`, but with explicit exposure tracking.
 
-This is the "listener." It's not an explicit `addEventListener` — it's implicit in the hook's subscription to React Context.
+### Why `variation()` instead of `useFlags()`
 
-### The fallback (`?? false`)
+`useFlags()` calls `allFlags()` internally, which the LD documentation notes may not send exposure events in all SDKs and configurations. `variation()` is the canonical method that guarantees an exposure event is fired — required when the flag is connected to an experiment.
+
+### The fallback (`false`)
 
 ```tsx
-const bannerV2Enabled = flags['banner-v2-enabled'] ?? false;
+ldClient?.variation('banner-v2-enabled', false)
 ```
 
-On first render, the SDK may not have finished loading flags yet. `?? false` ensures the old banner shows by default until the SDK is ready. This prevents a flash of the wrong state.
-
-### Alternative: `useFlag` (singular)
-
-If you only need one flag, there's a cleaner single-flag hook:
-
-```tsx
-import { useFlag } from 'launchdarkly-react-client-sdk';
-const bannerV2Enabled = useFlag('banner-v2-enabled');
-```
-
-`useFlags()` (plural) is better when checking multiple flags in the same component.
+The second argument to `variation()` is the default value returned if the SDK hasn't initialized yet or the flag doesn't exist. `false` ensures the old banner shows until the SDK is ready.
 
 ---
 

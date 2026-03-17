@@ -10,14 +10,16 @@ import { useQuery } from '@tanstack/react-query';
 import ApiGateway from '../gateways/Api.gateway';
 import Banner from '../components/Banner';
 import BannerV2 from '../components/Banner/BannerV2';
-import { useFlags } from 'launchdarkly-react-client-sdk';
+import { useLDClient } from 'launchdarkly-react-client-sdk';
 import { CypressFields } from '../utils/enums/CypressFields';
 import { useCurrency } from '../providers/Currency.provider';
 
 const Home: NextPage = () => {
   const { selectedCurrency } = useCurrency();
-  const flags = useFlags();
-  const bannerV2Enabled = flags.bannerV2Enabled ?? false;
+  const ldClient = useLDClient();
+  // Use variation() instead of useFlags() — variation() explicitly registers an exposure event,
+  // which is required for experiment tracking. useFlags()/allFlags() may not send exposure events.
+  const bannerV2Enabled = ldClient?.variation('banner-v2-enabled', false) ?? false;
 
   const { data: productList = [] } = useQuery({
     queryKey: ['products', selectedCurrency],

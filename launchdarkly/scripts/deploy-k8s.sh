@@ -28,12 +28,13 @@ DOCKER_BUILDKIT=1 docker build \
   -t "$LOAD_GEN_IMAGE" \
   "$REPO_ROOT"
 
-echo "Updating frontend deployment..."
+echo "Updating frontend image..."
 kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE"
 kubectl rollout restart deployment/frontend
 
-echo "Updating load-generator deployment..."
+echo "Updating load-generator image and memory limit..."
 kubectl set image deployment/load-generator load-generator="$LOAD_GEN_IMAGE"
+kubectl patch deployment load-generator -p '{"spec":{"template":{"spec":{"containers":[{"name":"load-generator","resources":{"requests":{"memory":"3000Mi"},"limits":{"memory":"3000Mi"}}}]}}}}'
 kubectl rollout restart deployment/load-generator
 
 echo "Waiting for rollouts..."
